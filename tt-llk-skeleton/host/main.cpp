@@ -97,6 +97,20 @@ BackendCfg backend_cfg_for(const std::string& backend) {
             .is_int8 = true,
         };
     }
+    if (backend == "tt_llk_fp32_matrix") {
+        // Tensix matrix engine with Float32 inputs. Internally uses TF32-fidelity
+        // per Tenstorrent's fp32_accuracy doc — same fidelity as NVIDIA's Tensor
+        // Core FP32 (cublaslt_tf32). DataFormat::Tf32 itself throws "unsupported
+        // atm" in tt_backend_api_types.hpp:72; Float32 is the supported entry.
+        return BackendCfg{
+            .in_fmt = DataFormat::Float32,
+            .out_fmt = DataFormat::Float32,
+            .in_bytes = static_cast<uint32_t>(sizeof(float) * TILE_HW),     // 4096
+            .out_bytes = static_cast<uint32_t>(sizeof(float) * TILE_HW),    // 4096
+            .fp32_dest_acc = true,
+            .is_int8 = false,
+        };
+    }
     // Default: BF16 (the only other backend with a working compute kernel).
     return BackendCfg{
         .in_fmt = DataFormat::Float16_b,
@@ -132,6 +146,9 @@ Args parse_args(int argc, char** argv) {
 const char* compute_kernel_for(const std::string& backend) {
     if (backend == "tt_llk_bf16") return KERNEL_DIR "/compute_bf16_mma.cpp";
     if (backend == "tt_llk_int8") return KERNEL_DIR "/compute_int8_mma.cpp";
+    // Matrix-engine FP32 reuses the BF16 compute kernel verbatim — the LLK is
+    // dtype-agnostic and the CB DataFormat (Float32) selects the FP32 path.
+    if (backend == "tt_llk_fp32_matrix") return KERNEL_DIR "/compute_bf16_mma.cpp";
     if (backend == "tt_llk_sfpu_fp32") return KERNEL_DIR "/compute_sfpu_fp32.cpp";
     return nullptr;
 }
@@ -370,6 +387,18 @@ int main(int argc, char** argv) {
             b_host = tilize_int8_nfaces(b_host, args.K, args.N);
             convert_to_sign_mag(a_host);
             convert_to_sign_mag(b_host);
+            distributed::EnqueueWriteMeshBuffer(cq, a_buf, a_host, /*blocking=*/false);
+            distributed::EnqueueWriteMeshBuffer(cq, b_buf, b_host, /*blocking=*/false);
+        } else if (cfg.in_fmt == DataFormat::Float32) {
+            // Tensix matrix-engine FP32 path. tilize_nfaces<float> is in the
+            // standard library instantiation set.
+            std::uniform_real_distribution<float> dist(-0.5f, 0.5f);
+            std::vector<float> a_host(static_cast<size_t>(args.M) * args.K);
+            std::vector<float> b_host(static_cast<size_t>(args.K) * args.N);
+            for (auto& v : a_host) v = dist(rng);
+            for (auto& v : b_host) v = dist(rng);
+            a_host = tilize_nfaces(a_host, args.M, args.K);
+            b_host = tilize_nfaces(b_host, args.K, args.N);
             distributed::EnqueueWriteMeshBuffer(cq, a_buf, a_host, /*blocking=*/false);
             distributed::EnqueueWriteMeshBuffer(cq, b_buf, b_host, /*blocking=*/false);
         } else {

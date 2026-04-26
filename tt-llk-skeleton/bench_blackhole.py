@@ -43,10 +43,16 @@ from scripts._bench_common import (  # noqa: E402
     write_results,
 )
 
-# v1: BF16 is the only backend whose compute kernel is implemented (real
-# Blackhole BF16 matmul). INT8 / SFPU FP32 emit "skipped" records via the
-# C++ binary so the comparison summary stays honest.
-DEFAULT_BACKENDS = ("tt_llk_bf16", "tt_llk_int8", "tt_llk_sfpu_fp32")
+# BF16, INT8, and FP32-matrix backends have working compute kernels (real
+# Blackhole matrix-engine matmul). SFPU FP32 has no LLK matmul/FMA tile
+# primitive — it emits a "skipped" record via the C++ binary's early-skip,
+# documented in BENCHMARK_TT.md §5(c).
+DEFAULT_BACKENDS = (
+    "tt_llk_bf16",
+    "tt_llk_int8",
+    "tt_llk_fp32_matrix",
+    "tt_llk_sfpu_fp32",
+)
 DEFAULT_SIZES = (512, 1024, 2048, 4096, 8192)
 QUICK_SIZES = (256, 512)
 LAYER_B_ITERS = {"warmup": 5, "iters": 50}
