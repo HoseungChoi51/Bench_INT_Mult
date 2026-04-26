@@ -67,6 +67,7 @@ from scripts._bench_common import (  # noqa: E402
     git_sha,
     now_iso,
     q36_ntt_friendly_prime,
+    q48_ntt_friendly_prime,
     write_results,
 )
 
@@ -322,22 +323,28 @@ def _shift_mod_q_table(q: int, n_chunks: int = 5, chunk_bits: int = 8) -> list[i
     return [pow(1 << (chunk_bits * k), 1, q) for k in range(2 * n_chunks - 1)]
 
 
-def _q36_int8_modmul_elementwise(a_list: list[int], b_list: list[int], q: int) -> list[int]:
+def _qn_int8_modmul_elementwise(
+    a_list: list[int], b_list: list[int], q: int, n_chunks: int,
+) -> list[int]:
     """Reference path used **only by the correctness gate**, on the GPU.
 
-    Decomposes each operand into 5 INT8 byte chunks, runs 25 elementwise
-    chunk products, scales each by ``2^(8(i+j)) mod q``, reduces mod q, and
-    sums. This is the **same recipe** the matmul perf path uses (modulo the
-    GEMM versus elementwise multiply); a passing gate is strong evidence
-    the matmul path will also be correct (the matmul path is additionally
-    unit-tested at small scale in
-    ``tests/test_hardware_gpu.py::test_36bit_matmul_via_25_int8_gemms``).
+    Decomposes each operand into ``n_chunks`` INT8 byte chunks, runs
+    ``n_chunks**2`` elementwise chunk products, scales each by
+    ``2^(8(i+j)) mod q``, reduces mod q, and sums. This is the **same
+    recipe** the matmul perf path uses (modulo the GEMM versus elementwise
+    multiply); a passing gate is strong evidence the matmul path will also
+    be correct.
 
     Per-pair mod-q reduction is required: a naive int64 accumulator with
     raw byte shifts would overflow at the highest shift positions
-    (``i + j = 8`` shifts by 64 bits, undefined for int64).
+    (``i + j = 2(n_chunks-1)`` shifts by ``16(n_chunks-1)`` bits — for
+    n_chunks=5 that's 64 bits, undefined for int64).
+
+    For q48, the per-pair scaled term ``a_i*b_j*smq`` can exceed int64
+    (smq is up to 2^48, chunk_prod up to 2^14, product up to 2^62 — tight
+    but fits). The sum across n_chunks² terms is mod-reduced per term so
+    accumulation stays bounded.
     """
-    n_chunks = 5
     a = torch.tensor(a_list, dtype=torch.int64, device="cuda")
     b = torch.tensor(b_list, dtype=torch.int64, device="cuda")
     mask = torch.tensor(0xFF, dtype=torch.int64, device="cuda")
@@ -349,7 +356,8 @@ def _q36_int8_modmul_elementwise(a_list: list[int], b_list: list[int], q: int) -
     out = torch.zeros(a.shape, dtype=torch.int64, device="cuda")
     for i in range(n_chunks):
         for j in range(n_chunks):
-            # chunk product < 2^14, shift_mod_q < q < 2^36 → < 2^50, fits int64
+            # chunk_prod < 2^14, smq < q. For q36: product < 2^50; for q48:
+            # product < 2^62. Both fit signed int64.
             term = (a_chunks[i] * b_chunks[j]) * smq[i + j]
             out += term % q
     out = out % q
@@ -357,24 +365,25 @@ def _q36_int8_modmul_elementwise(a_list: list[int], b_list: list[int], q: int) -
 
 
 def _layer_c_perf_step_factory(
-    m: int, k: int, n: int, q: int
+    m: int, k: int, n: int, q: int, n_chunks: int = 5,
 ) -> Callable[[], object]:
-    """Build the 25-INT8-GEMM matmul reconstruction step at the given shape.
+    """Build the n_chunks²-INT8-GEMM matmul reconstruction step at the given shape.
 
     Random INT8-chunked operands in ``[0, 127]`` per chunk so each chunk
-    fits in signed int8 without sign tricks. The 25 ``torch._int_mm`` calls
-    each return int32; each partial is scaled by ``2^(8(i+j)) mod q``,
-    reduced mod q, and accumulated. This **per-pair reduction** keeps the
-    int64 accumulator bounded: the largest scaled-and-reduced term fits in
-    ``q < 2^36`` and 25 such terms sum to ``< 25·q < 2^41``, safely inside
-    signed int64.
+    fits in signed int8 without sign tricks. The ``n_chunks**2``
+    ``torch._int_mm`` calls each return int32; each partial is scaled by
+    ``2^(8(i+j)) mod q``, reduced mod q, and accumulated. **Per-pair
+    reduction** keeps the int64 accumulator bounded: the largest
+    scaled-and-reduced term fits in ``q`` and ``n_chunks² · q`` sum stays
+    in signed int64 for q36. **q48 is not yet supported on this path** —
+    the int64 multiplication ``partial · smq`` overflows for q ≥ 2^48
+    even at small K. Use Barrett split for q48 (v3).
 
     The earlier ``out += partial << (8*(i+j))`` pattern (used in
     ``scripts/bench_gpu.py``) **silently overflows** int64 for shifts up
     to 64 bits, so its ``% q`` output is incorrect. That bench is kept for
     the cost-model narrative; this one shadows it with the correct recipe.
     """
-    n_chunks = 5
     a_chunks = [
         torch.randint(0, 128, (m, k), dtype=torch.int8, device="cuda") for _ in range(n_chunks)
     ]
@@ -384,13 +393,14 @@ def _layer_c_perf_step_factory(
     out = torch.zeros((m, n), dtype=torch.int64, device="cuda")
     smq = _shift_mod_q_table(q, n_chunks=n_chunks)
 
-    # Sanity: K · 127² · (q-1) < 2^63 ⇒ K < 2^63 / (127² · q) ≈ 8323 for this q.
-    # Above that the int64 partial-times-scale multiplication overflows; switch
-    # to a wider intermediate (Barrett, or split partial).
+    # Sanity: K · 127² · (q-1) < 2^63 ⇒ partial-times-scale int64 multiply
+    # is in range. For q36 + K=8192 this is ~2^60 (just fits); for q48 the
+    # bound fails at any meaningful K. Caller should route q48 to a
+    # different reduction path (or skip with `correctness.gate=skipped`).
     if k * 127 * 127 * (q - 1) >= (1 << 63):
         raise ValueError(
             f"K={k} too large for int64 partial-scale multiply with q={q}; "
-            "use Barrett reduction in v2"
+            "use Barrett reduction (v3)"
         )
 
     def step() -> None:
@@ -406,31 +416,61 @@ def _layer_c_perf_step_factory(
     return step
 
 
-def layer_c_q36_int8_modmul(sizes: tuple[int, ...]) -> list[BenchResult]:
+LAYER_C_PRIMES: dict[int, tuple[int, int]] = {
+    36: (q36_ntt_friendly_prime(), 5),  # 5x5 = 25 INT8 GEMMs per modmul
+    48: (q48_ntt_friendly_prime(), 6),  # 6x6 = 36 INT8 GEMMs per modmul
+}
+
+
+def layer_c_int8_modmul(
+    sizes: tuple[int, ...], primes: tuple[int, ...] = (36, 48)
+) -> list[BenchResult]:
+    """Layer C — exact n-bit modular product via the byte-decomposition recipe.
+
+    Per-prime ``useful_op_kind`` is ``exact_modmul_q36`` / ``exact_modmul_q48``
+    so compare.py renders one row per prime size.
+
+    q48 currently emits ``correctness.gate == "skipped"`` records: the
+    int64 reduction path overflows for q ≥ 2^48 (see
+    :func:`_layer_c_perf_step_factory`). v3 will add Barrett split.
+    """
     sha, ts = git_sha(), now_iso()
     dev = device_info()
-    q = q36_ntt_friendly_prime()
-
-    # Correctness gate — run once, not per size. The gate validates the
-    # *decomposition+reduction* recipe; the per-size perf path uses the same
-    # recipe just at matmul scale.
-    gate = correctness_gate(lambda a, b: _q36_int8_modmul_elementwise(a, b, q), q)
-
     results: list[BenchResult] = []
-    for s in sizes:
-        if gate.gate != "passed":
-            results.append(
-                BenchResult(
+
+    for prime_bits in primes:
+        if prime_bits not in LAYER_C_PRIMES:
+            raise ValueError(
+                f"unknown Layer C prime size {prime_bits}; "
+                f"add it to LAYER_C_PRIMES"
+            )
+        q, n_chunks = LAYER_C_PRIMES[prime_bits]
+        n_gemms = n_chunks * n_chunks
+        op_kind = f"exact_modmul_q{prime_bits}"
+        prime_label = f"q{prime_bits}"
+
+        # Correctness gate — run once per prime, not per size. The gate
+        # validates the decomposition+reduction recipe in a host-bigint
+        # equivalent; the per-size perf path then runs that recipe at
+        # matmul scale on the GPU.
+        gate = correctness_gate(
+            lambda a, b, q=q, nc=n_chunks: _qn_int8_modmul_elementwise(a, b, q, nc), q,
+        )
+
+        for s in sizes:
+            base_detail = {**dev, "prime_bits": prime_bits, "q": q}
+
+            if gate.gate != "passed":
+                results.append(BenchResult(
                     schema_version=SCHEMA_VERSION,
                     device="RTX5090",
-                    device_detail={**dev, "q36": q},
-                    layer="C",
-                    backend="cublaslt_int8",
+                    device_detail=base_detail,
+                    layer="C", backend="cublaslt_int8",
                     shape={"M": s, "K": s, "N": s},
                     dtype_in="int8", dtype_acc="int32",
                     iters=0, warmup=0,
                     median_ms=None, p10_ms=None, p90_ms=None,
-                    useful_ops=None, useful_op_kind="exact_modmul",
+                    useful_ops=None, useful_op_kind=op_kind,
                     throughput=None, throughput_unit="G_modmul/s",
                     correctness={
                         "gate": gate.gate,
@@ -441,24 +481,47 @@ def layer_c_q36_int8_modmul(sizes: tuple[int, ...]) -> list[BenchResult]:
                     },
                     host_overhead_ms=None,
                     git_sha=sha, timestamp=ts,
-                )
-            )
-            continue
-        try:
-            step = _layer_c_perf_step_factory(s, s, s, q)
-        except torch.cuda.OutOfMemoryError as e:
-            results.append(
-                BenchResult(
+                ))
+                continue
+
+            try:
+                step = _layer_c_perf_step_factory(s, s, s, q, n_chunks=n_chunks)
+            except ValueError as e:
+                # Reduction path can't handle this (prime, K) combination —
+                # most commonly q48, where partial * smq overflows int64.
+                results.append(BenchResult(
                     schema_version=SCHEMA_VERSION,
                     device="RTX5090",
-                    device_detail={**dev, "q36": q, "backend_detail": {"error": f"OOM: {e}"}},
-                    layer="C",
-                    backend="cublaslt_int8",
+                    device_detail={**base_detail, "skip_reason": str(e)},
+                    layer="C", backend="cublaslt_int8",
                     shape={"M": s, "K": s, "N": s},
                     dtype_in="int8", dtype_acc="int32",
                     iters=0, warmup=0,
                     median_ms=None, p10_ms=None, p90_ms=None,
-                    useful_ops=None, useful_op_kind="exact_modmul",
+                    useful_ops=None, useful_op_kind=op_kind,
+                    throughput=None, throughput_unit="G_modmul/s",
+                    correctness={
+                        "gate": "skipped",
+                        "note": (
+                            f"int64 reduction overflows for {prime_label} on "
+                            f"this NVIDIA path; needs Barrett split (v3)"
+                        ),
+                    },
+                    host_overhead_ms=None,
+                    git_sha=sha, timestamp=ts,
+                ))
+                continue
+            except torch.cuda.OutOfMemoryError as e:
+                results.append(BenchResult(
+                    schema_version=SCHEMA_VERSION,
+                    device="RTX5090",
+                    device_detail={**base_detail, "backend_detail": {"error": f"OOM: {e}"}},
+                    layer="C", backend="cublaslt_int8",
+                    shape={"M": s, "K": s, "N": s},
+                    dtype_in="int8", dtype_acc="int32",
+                    iters=0, warmup=0,
+                    median_ms=None, p10_ms=None, p90_ms=None,
+                    useful_ops=None, useful_op_kind=op_kind,
                     throughput=None, throughput_unit="G_modmul/s",
                     correctness={
                         "gate": "passed",  # gate did pass — skip is OOM, not correctness
@@ -467,34 +530,35 @@ def layer_c_q36_int8_modmul(sizes: tuple[int, ...]) -> list[BenchResult]:
                     },
                     host_overhead_ms=None,
                     git_sha=sha, timestamp=ts,
-                )
-            )
-            torch.cuda.empty_cache()
-            continue
-        median_ms, p10, p90 = cuda_time(step, **LAYER_C_ITERS)
-        useful_ops = s * s  # one logical exact 36-bit modmul per output element
-        g_modmul_per_sec = useful_ops / (median_ms * 1e-3) / 1e9
-        results.append(
-            BenchResult(
+                ))
+                torch.cuda.empty_cache()
+                continue
+
+            median_ms, p10, p90 = cuda_time(step, **LAYER_C_ITERS)
+            useful_ops = s * s
+            g_modmul_per_sec = useful_ops / (median_ms * 1e-3) / 1e9
+            results.append(BenchResult(
                 schema_version=SCHEMA_VERSION,
                 device="RTX5090",
                 device_detail={
-                    **dev,
-                    "q36": q,
+                    **base_detail,
                     "backend_detail": {
-                        "dispatch": "25 × torch._int_mm (cuBLASLt IGEMM) + int64 shift/add + % q",
-                        "n_int8_gemms": 25,
+                        "dispatch": (
+                            f"{n_gemms} × torch._int_mm (cuBLASLt IGEMM) + "
+                            f"int64 per-partial scale/mod + final % q"
+                        ),
+                        "n_int8_gemms": n_gemms,
+                        "n_chunks": n_chunks,
                     },
                 },
-                layer="C",
-                backend="cublaslt_int8",
+                layer="C", backend="cublaslt_int8",
                 shape={"M": s, "K": s, "N": s},
                 dtype_in="int8", dtype_acc="int32",
                 iters=LAYER_C_ITERS["iters"],
                 warmup=LAYER_C_ITERS["warmup"],
                 median_ms=median_ms, p10_ms=p10, p90_ms=p90,
                 useful_ops=useful_ops,
-                useful_op_kind="exact_modmul",
+                useful_op_kind=op_kind,
                 throughput=g_modmul_per_sec,
                 throughput_unit="G_modmul/s",
                 correctness={
@@ -505,10 +569,9 @@ def layer_c_q36_int8_modmul(sizes: tuple[int, ...]) -> list[BenchResult]:
                 },
                 host_overhead_ms=None,
                 git_sha=sha, timestamp=ts,
-            )
-        )
-        del step
-        torch.cuda.empty_cache()
+            ))
+            del step
+            torch.cuda.empty_cache()
     return results
 
 
@@ -543,7 +606,7 @@ def cpu_int128_baseline_record(n: int = 100_000) -> BenchResult:
         iters=5, warmup=1,
         median_ms=median_ms, p10_ms=p10, p90_ms=p90,
         useful_ops=n,
-        useful_op_kind="exact_modmul",
+        useful_op_kind="exact_modmul_q36",
         throughput=throughput / 1e3,  # report as G_modmul/s for unit consistency
         throughput_unit="G_modmul/s",
         correctness={"gate": "passed", "note": "trivially exact (Python int reference)"},
@@ -578,6 +641,13 @@ def main(argv: list[str] | None = None) -> int:
         "--no-cpu", action="store_true",
         help="Skip the CPU bigint baseline (slow on cold runs).",
     )
+    p.add_argument(
+        "--primes", default="36,48",
+        help="Comma-separated Layer C prime sizes in bits "
+             "(default: 36,48). Each entry must be a key in LAYER_C_PRIMES. "
+             "q48 currently emits skipped records (int64 reduction overflows; "
+             "Barrett split is v3 work).",
+    )
     args = p.parse_args(argv)
 
     if not torch.cuda.is_available():
@@ -590,6 +660,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         sizes = QUICK_SIZES if args.quick else DEFAULT_SIZES
     backends = tuple(args.backends.split(","))
+    primes = tuple(int(p) for p in args.primes.split(","))
 
     print(f"device   : {device_info()['name']} (sm_{device_info()['sm']})")
     print(f"out      : {args.out}")
@@ -606,8 +677,9 @@ def main(argv: list[str] | None = None) -> int:
         print("Layer B (raw GEMM)…")
         all_results.extend(layer_b_raw_gemm(sizes, backends))
     if "C" in layers:
-        print("Layer C-minimal (q36 INT8 modmul)…")
-        all_results.extend(layer_c_q36_int8_modmul(sizes))
+        prime_label = ",".join(f"q{pb}" for pb in primes)
+        print(f"Layer C ({prime_label} INT8 modmul)…")
+        all_results.extend(layer_c_int8_modmul(sizes, primes=primes))
         if not args.no_cpu:
             print("CPU bigint baseline…")
             all_results.append(cpu_int128_baseline_record())
