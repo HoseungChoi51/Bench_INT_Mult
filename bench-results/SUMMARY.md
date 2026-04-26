@@ -2,9 +2,9 @@
 
 - **Schema version**: 1
 - **Devices**: Blackhole, CPU, RTX5090
-- **Records**: 53
-- **Timestamps**: 2026-04-26T17:45:10+00:00 – 2026-04-26T18:14:34+00:00
-- **Git SHAs**: 7e16b7d, fa2e772
+- **Records**: 76
+- **Timestamps**: 2026-04-26T17:45:10+00:00 – 2026-04-26T19:10:26+00:00
+- **Git SHAs**: 7e16b7d, dbe3cc1, fa2e772
 
 ## Device prices (declared, not detected)
 
@@ -49,58 +49,74 @@ _Side-by-side bar chart at one representative shape._
 
 | op_kind | shape | backend | Blackhole thr | Blackhole /k$ | Blackhole gate | RTX5090 thr | RTX5090 /k$ | RTX5090 gate |
 |---|---|---|---|---|---|---|---|---|
-| gemm_mac | 1024×1024×1024 | bf16 | 3.66 TFLOPS | 3.659 /k$ | skipped | — | — | — |
+| gemm_mac | 1024×1024×1024 | bf16 | 3.65 TFLOPS | 3.658 /k$ | skipped | — | — | — |
 | gemm_mac | 1024×1024×1024 | fp32 | — | — | skipped | 48.19 TFLOPS | 24.109 /k$ | skipped |
 | gemm_mac | 1024×1024×1024 | fp64 | — | — | — | 1.49 TFLOPS | 0.747 /k$ | skipped |
-| gemm_mac | 1024×1024×1024 | int8 | — | — | skipped | 76.35 TOPS | 38.193 /k$ | skipped |
+| gemm_mac | 1024×1024×1024 | int8 | 6.48 TOPS | 6.490 /k$ | skipped | 76.35 TOPS | 38.193 /k$ | skipped |
 | gemm_mac | 1024×1024×1024 | tf32 | — | — | — | 76.87 TFLOPS | 38.455 /k$ | skipped |
 
 **Headline ratios — RTX5090 vs Blackhole, best backend per device** (higher = RTX5090 wins):
 
 | op_kind | shape | RTX5090 best | Blackhole best | RTX5090 / Blackhole | price-adjusted (RTX5090 /k$) / (Blackhole /k$) |
 |---|---|---|---|---|---|
-| gemm_mac | 1024×1024×1024 | tf32 (76.87 TFLOPS) | bf16 (3.66 TFLOPS) | 21.03× | 10.51× |
+| gemm_mac | 1024×1024×1024 | tf32 (76.87 TFLOPS) | int8 (6.48 TOPS) | 11.86× | 5.93× |
+
+**Per-matching-backend ratios — RTX5090 vs Blackhole** (only shown where both devices have the backend implemented):
+
+| op_kind | shape | backend | RTX5090 / Blackhole | price-adjusted (RTX5090 /k$) / (Blackhole /k$) |
+|---|---|---|---|---|
+| gemm_mac | 1024×1024×1024 | int8 | 11.78× | 5.88× |
 
 ## Layer B — raw GEMM
 ### Layer B
 
 | op_kind | shape | backend | Blackhole thr | Blackhole /k$ | Blackhole gate | RTX5090 thr | RTX5090 /k$ | RTX5090 gate |
 |---|---|---|---|---|---|---|---|---|
-| gemm_mac | 512×512×512 | bf16 | 2.48 TFLOPS | 2.486 /k$ | skipped | — | — | — |
+| gemm_mac | 512×512×512 | bf16 | 2.48 TFLOPS | 2.480 /k$ | skipped | — | — | — |
 | gemm_mac | 512×512×512 | fp32 | — | — | skipped | 8.90 TFLOPS | 4.450 /k$ | skipped |
 | gemm_mac | 512×512×512 | fp64 | — | — | — | 1.02 TFLOPS | 0.510 /k$ | skipped |
-| gemm_mac | 512×512×512 | int8 | — | — | skipped | 17.15 TOPS | 8.582 /k$ | skipped |
+| gemm_mac | 512×512×512 | int8 | 3.66 TOPS | 3.666 /k$ | skipped | 17.15 TOPS | 8.582 /k$ | skipped |
 | gemm_mac | 512×512×512 | tf32 | — | — | — | 9.75 TFLOPS | 4.880 /k$ | skipped |
 | gemm_mac | 1024×1024×1024 | bf16 | 3.66 TFLOPS | 3.659 /k$ | skipped | — | — | — |
 | gemm_mac | 1024×1024×1024 | fp32 | — | — | skipped | 48.06 TFLOPS | 24.040 /k$ | skipped |
 | gemm_mac | 1024×1024×1024 | fp64 | — | — | — | 1.45 TFLOPS | 0.727 /k$ | skipped |
-| gemm_mac | 1024×1024×1024 | int8 | — | — | skipped | 76.43 TOPS | 38.236 /k$ | skipped |
+| gemm_mac | 1024×1024×1024 | int8 | 6.48 TOPS | 6.489 /k$ | skipped | 76.43 TOPS | 38.236 /k$ | skipped |
 | gemm_mac | 1024×1024×1024 | tf32 | — | — | — | 76.96 TFLOPS | 38.499 /k$ | skipped |
-| gemm_mac | 2048×2048×2048 | bf16 | 3.84 TFLOPS | 3.847 /k$ | skipped | — | — | — |
+| gemm_mac | 2048×2048×2048 | bf16 | 3.84 TFLOPS | 3.845 /k$ | skipped | — | — | — |
 | gemm_mac | 2048×2048×2048 | fp32 | — | — | skipped | 67.75 TFLOPS | 33.893 /k$ | skipped |
 | gemm_mac | 2048×2048×2048 | fp64 | — | — | — | 1.38 TFLOPS | 0.689 /k$ | skipped |
-| gemm_mac | 2048×2048×2048 | int8 | — | — | skipped | 179.74 TOPS | 89.913 /k$ | skipped |
+| gemm_mac | 2048×2048×2048 | int8 | 7.32 TOPS | 7.331 /k$ | skipped | 179.74 TOPS | 89.913 /k$ | skipped |
 | gemm_mac | 2048×2048×2048 | tf32 | — | — | — | 89.43 TFLOPS | 44.736 /k$ | skipped |
-| gemm_mac | 4096×4096×4096 | bf16 | 3.91 TFLOPS | 3.916 /k$ | skipped | — | — | — |
+| gemm_mac | 4096×4096×4096 | bf16 | 3.91 TFLOPS | 3.914 /k$ | skipped | — | — | — |
 | gemm_mac | 4096×4096×4096 | fp32 | — | — | skipped | 58.57 TFLOPS | 29.299 /k$ | skipped |
 | gemm_mac | 4096×4096×4096 | fp64 | — | — | — | 1.49 TFLOPS | 0.747 /k$ | skipped |
-| gemm_mac | 4096×4096×4096 | int8 | — | — | skipped | 214.53 TOPS | 107.321 /k$ | skipped |
+| gemm_mac | 4096×4096×4096 | int8 | 7.57 TOPS | 7.580 /k$ | skipped | 214.53 TOPS | 107.321 /k$ | skipped |
 | gemm_mac | 4096×4096×4096 | tf32 | — | — | — | 102.59 TFLOPS | 51.319 /k$ | skipped |
-| gemm_mac | 8192×8192×8192 | bf16 | 3.89 TFLOPS | 3.892 /k$ | skipped | — | — | — |
+| gemm_mac | 8192×8192×8192 | bf16 | 3.89 TFLOPS | 3.894 /k$ | skipped | — | — | — |
 | gemm_mac | 8192×8192×8192 | fp32 | — | — | skipped | 61.69 TFLOPS | 30.862 /k$ | skipped |
 | gemm_mac | 8192×8192×8192 | fp64 | — | — | — | 1.58 TFLOPS | 0.792 /k$ | skipped |
-| gemm_mac | 8192×8192×8192 | int8 | — | — | skipped | 210.11 TOPS | 105.105 /k$ | skipped |
+| gemm_mac | 8192×8192×8192 | int8 | 7.39 TOPS | 7.396 /k$ | skipped | 210.11 TOPS | 105.105 /k$ | skipped |
 | gemm_mac | 8192×8192×8192 | tf32 | — | — | — | 100.87 TFLOPS | 50.462 /k$ | skipped |
 
 **Headline ratios — RTX5090 vs Blackhole, best backend per device** (higher = RTX5090 wins):
 
 | op_kind | shape | RTX5090 best | Blackhole best | RTX5090 / Blackhole | price-adjusted (RTX5090 /k$) / (Blackhole /k$) |
 |---|---|---|---|---|---|
-| gemm_mac | 512×512×512 | int8 (17.15 TOPS) | bf16 (2.48 TFLOPS) | 6.91× | 3.45× |
-| gemm_mac | 1024×1024×1024 | tf32 (76.96 TFLOPS) | bf16 (3.66 TFLOPS) | 21.06× | 10.52× |
-| gemm_mac | 2048×2048×2048 | int8 (179.74 TOPS) | bf16 (3.84 TFLOPS) | 46.77× | 23.37× |
-| gemm_mac | 4096×4096×4096 | int8 (214.53 TOPS) | bf16 (3.91 TFLOPS) | 54.83× | 27.40× |
-| gemm_mac | 8192×8192×8192 | int8 (210.11 TOPS) | bf16 (3.89 TFLOPS) | 54.03× | 27.00× |
+| gemm_mac | 512×512×512 | int8 (17.15 TOPS) | int8 (3.66 TOPS) | 4.68× | 2.34× |
+| gemm_mac | 1024×1024×1024 | tf32 (76.96 TFLOPS) | int8 (6.48 TOPS) | 11.87× | 5.93× |
+| gemm_mac | 2048×2048×2048 | int8 (179.74 TOPS) | int8 (7.32 TOPS) | 24.54× | 12.26× |
+| gemm_mac | 4096×4096×4096 | int8 (214.53 TOPS) | int8 (7.57 TOPS) | 28.33× | 14.16× |
+| gemm_mac | 8192×8192×8192 | int8 (210.11 TOPS) | int8 (7.39 TOPS) | 28.44× | 14.21× |
+
+**Per-matching-backend ratios — RTX5090 vs Blackhole** (only shown where both devices have the backend implemented):
+
+| op_kind | shape | backend | RTX5090 / Blackhole | price-adjusted (RTX5090 /k$) / (Blackhole /k$) |
+|---|---|---|---|---|
+| gemm_mac | 512×512×512 | int8 | 4.68× | 2.34× |
+| gemm_mac | 1024×1024×1024 | int8 | 11.79× | 5.89× |
+| gemm_mac | 2048×2048×2048 | int8 | 24.54× | 12.26× |
+| gemm_mac | 4096×4096×4096 | int8 | 28.33× | 14.16× |
+| gemm_mac | 8192×8192×8192 | int8 | 28.44× | 14.21× |
 
 ## Layer C — exact 36-bit modular product
 ### Layer C
@@ -108,26 +124,36 @@ _Side-by-side bar chart at one representative shape._
 | op_kind | shape | backend | Blackhole thr | Blackhole /k$ | Blackhole gate | CPU thr | CPU /k$ | CPU gate | RTX5090 thr | RTX5090 /k$ | RTX5090 gate |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | exact_modmul | 512×512×512 | bf16 | 0.12 G_modmul/s | 0.123 /k$ | passed | — | — | — | — | — | — |
-| exact_modmul | 512×512×512 | int8 | — | — | — | — | — | — | 0.34 G_modmul/s | 0.169 /k$ | passed |
+| exact_modmul | 512×512×512 | int8 | 0.21 G_modmul/s | 0.208 /k$ | passed | — | — | — | 0.34 G_modmul/s | 0.169 /k$ | passed |
 | exact_modmul | 1024×1024×1024 | bf16 | 0.07 G_modmul/s | 0.074 /k$ | passed | — | — | — | — | — | — |
-| exact_modmul | 1024×1024×1024 | int8 | — | — | — | — | — | — | 0.84 G_modmul/s | 0.422 /k$ | passed |
+| exact_modmul | 1024×1024×1024 | int8 | 0.14 G_modmul/s | 0.136 /k$ | passed | — | — | — | 0.84 G_modmul/s | 0.422 /k$ | passed |
 | exact_modmul | 2048×2048×2048 | bf16 | 0.04 G_modmul/s | 0.038 /k$ | passed | — | — | — | — | — | — |
-| exact_modmul | 2048×2048×2048 | int8 | — | — | — | — | — | — | 0.85 G_modmul/s | 0.426 /k$ | passed |
+| exact_modmul | 2048×2048×2048 | int8 | 0.07 G_modmul/s | 0.073 /k$ | passed | — | — | — | 0.85 G_modmul/s | 0.426 /k$ | passed |
 | exact_modmul | 4096×4096×4096 | bf16 | 0.02 G_modmul/s | 0.019 /k$ | passed | — | — | — | — | — | — |
-| exact_modmul | 4096×4096×4096 | int8 | — | — | — | — | — | — | 0.45 G_modmul/s | 0.224 /k$ | passed |
+| exact_modmul | 4096×4096×4096 | int8 | 0.04 G_modmul/s | 0.037 /k$ | passed | — | — | — | 0.45 G_modmul/s | 0.224 /k$ | passed |
 | exact_modmul | 8192×8192×8192 | bf16 | 0.01 G_modmul/s | 0.010 /k$ | passed | — | — | — | — | — | — |
-| exact_modmul | 8192×8192×8192 | int8 | — | — | — | — | — | — | 0.33 G_modmul/s | 0.163 /k$ | passed |
+| exact_modmul | 8192×8192×8192 | int8 | 0.02 G_modmul/s | 0.018 /k$ | passed | — | — | — | 0.33 G_modmul/s | 0.163 /k$ | passed |
 | exact_modmul | 100000×1×1 | cpu | — | — | — | 0.01 G_modmul/s | — | passed | — | — | — |
 
 **Headline ratios — RTX5090 vs Blackhole, best backend per device** (higher = RTX5090 wins):
 
 | op_kind | shape | RTX5090 best | Blackhole best | RTX5090 / Blackhole | price-adjusted (RTX5090 /k$) / (Blackhole /k$) |
 |---|---|---|---|---|---|
-| exact_modmul | 512×512×512 | int8 (0.34 G_modmul/s) | bf16 (0.12 G_modmul/s) | 2.75× | 1.37× |
-| exact_modmul | 1024×1024×1024 | int8 (0.84 G_modmul/s) | bf16 (0.07 G_modmul/s) | 11.37× | 5.68× |
-| exact_modmul | 2048×2048×2048 | int8 (0.85 G_modmul/s) | bf16 (0.04 G_modmul/s) | 22.52× | 11.25× |
-| exact_modmul | 4096×4096×4096 | int8 (0.45 G_modmul/s) | bf16 (0.02 G_modmul/s) | 23.46× | 11.73× |
-| exact_modmul | 8192×8192×8192 | int8 (0.33 G_modmul/s) | bf16 (0.01 G_modmul/s) | 34.30× | 17.14× |
+| exact_modmul | 512×512×512 | int8 (0.34 G_modmul/s) | int8 (0.21 G_modmul/s) | 1.62× | 0.81× |
+| exact_modmul | 1024×1024×1024 | int8 (0.84 G_modmul/s) | int8 (0.14 G_modmul/s) | 6.21× | 3.10× |
+| exact_modmul | 2048×2048×2048 | int8 (0.85 G_modmul/s) | int8 (0.07 G_modmul/s) | 11.74× | 5.87× |
+| exact_modmul | 4096×4096×4096 | int8 (0.45 G_modmul/s) | int8 (0.04 G_modmul/s) | 12.09× | 6.04× |
+| exact_modmul | 8192×8192×8192 | int8 (0.33 G_modmul/s) | int8 (0.02 G_modmul/s) | 18.04× | 9.01× |
+
+**Per-matching-backend ratios — RTX5090 vs Blackhole** (only shown where both devices have the backend implemented):
+
+| op_kind | shape | backend | RTX5090 / Blackhole | price-adjusted (RTX5090 /k$) / (Blackhole /k$) |
+|---|---|---|---|---|
+| exact_modmul | 512×512×512 | int8 | 1.62× | 0.81× |
+| exact_modmul | 1024×1024×1024 | int8 | 6.21× | 3.10× |
+| exact_modmul | 2048×2048×2048 | int8 | 11.74× | 5.87× |
+| exact_modmul | 4096×4096×4096 | int8 | 12.09× | 6.04× |
+| exact_modmul | 8192×8192×8192 | int8 | 18.04× | 9.01× |
 
 ## How to update
 
