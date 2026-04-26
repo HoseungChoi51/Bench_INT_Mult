@@ -31,7 +31,7 @@ from typing import Any, Literal
 
 SCHEMA_VERSION = "2"
 
-Layer = Literal["A", "B", "C"]
+Layer = Literal["A", "B", "C", "D"]
 UsefulOpKind = Literal[
     "gemm_mac",
     "exact_modmul",       # legacy alias; v1 records use this for q36

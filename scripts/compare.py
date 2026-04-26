@@ -257,6 +257,8 @@ def render_summary(records: list[dict[str, Any]]) -> str:
     lines.append(render_layer(records, "B") or "_no Layer B records_\n")
     lines.append("## Layer C — exact 36-bit modular product")
     lines.append(render_layer(records, "C") or "_no Layer C records_\n")
+    lines.append("## Layer D — KLSS-style inner product (useful MAC view)")
+    lines.append(render_layer(records, "D") or "_no Layer D records_\n")
 
     lines.append("## How to update")
     lines.append("")

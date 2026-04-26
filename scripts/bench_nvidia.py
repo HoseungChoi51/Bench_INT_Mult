@@ -615,6 +615,131 @@ def layer_c_int8_modmul(
 # --- CPU baseline -----------------------------------------------------------
 
 
+def layer_d_klss_ip(
+    sizes: tuple[int, ...], primes: tuple[int, ...] = (36, 48)
+) -> list[BenchResult]:
+    """Layer D — KLSS-style inner product modulo q (FHE headline metric).
+
+    Same on-device dispatch as :func:`layer_c_int8_modmul` (n²-INT8-GEMM
+    cascade per output element), but reported as **useful MACs per second**
+    instead of modmuls per second so it contrasts directly with Layer B's
+    raw GEMM TOPS:
+
+      Layer B → "raw int8 matrix-engine throughput" (TOPS)
+      Layer D → "useful int8 KLSS-IP throughput inside an exact modmul" (G_MAC/s)
+
+    The ratio Layer D / Layer B is the "fraction of raw matrix throughput
+    that survives the exact modular reduction" — for the n_chunks² recipe
+    it asymptotes at 1/n_chunks² (1/25 for q36, 1/36 for q48).
+    """
+    sha, ts = git_sha(), now_iso()
+    dev = device_info()
+    results: list[BenchResult] = []
+
+    for prime_bits in primes:
+        if prime_bits not in LAYER_C_PRIMES:
+            raise ValueError(f"unknown Layer D prime size {prime_bits}")
+        q, n_chunks = LAYER_C_PRIMES[prime_bits]
+        n_gemms = n_chunks * n_chunks
+        op_kind = f"klss_ip_modmul_q{prime_bits}"
+
+        gate = correctness_gate(
+            lambda a, b, q=q, nc=n_chunks: _qn_int8_modmul_elementwise(a, b, q, nc), q,
+        )
+
+        for s in sizes:
+            base_detail = {**dev, "prime_bits": prime_bits, "q": q,
+                           "recipe_note": (
+                               f"{n_gemms}× INT8 GEMM cascade reported as MACs"
+                           )}
+            if gate.gate != "passed":
+                results.append(BenchResult(
+                    schema_version=SCHEMA_VERSION, device="RTX5090",
+                    device_detail=base_detail, layer="D", backend="cublaslt_int8",
+                    shape={"M": s, "K": s, "N": s},
+                    dtype_in="int8", dtype_acc="int32",
+                    iters=0, warmup=0,
+                    median_ms=None, p10_ms=None, p90_ms=None,
+                    useful_ops=None, useful_op_kind=op_kind,
+                    throughput=None, throughput_unit="G_MAC/s",
+                    correctness={"gate": gate.gate},
+                    host_overhead_ms=None,
+                    git_sha=sha, timestamp=ts,
+                ))
+                continue
+
+            try:
+                step = _layer_c_perf_step_factory(s, s, s, q, n_chunks=n_chunks)
+            except (ValueError, torch.cuda.OutOfMemoryError) as e:
+                results.append(BenchResult(
+                    schema_version=SCHEMA_VERSION, device="RTX5090",
+                    device_detail={**base_detail, "skip_reason": str(e)},
+                    layer="D", backend="cublaslt_int8",
+                    shape={"M": s, "K": s, "N": s},
+                    dtype_in="int8", dtype_acc="int32",
+                    iters=0, warmup=0,
+                    median_ms=None, p10_ms=None, p90_ms=None,
+                    useful_ops=None, useful_op_kind=op_kind,
+                    throughput=None, throughput_unit="G_MAC/s",
+                    correctness={"gate": "skipped",
+                                 "note": f"int64 reduction overflow: {e}"
+                                 if isinstance(e, ValueError) else f"OOM: {e}"},
+                    host_overhead_ms=None,
+                    git_sha=sha, timestamp=ts,
+                ))
+                torch.cuda.empty_cache()
+                continue
+
+            power_pre = read_nvidia_power_w()
+            median_ms, p10, p90 = cuda_time(step, **LAYER_C_ITERS)
+            power_post = read_nvidia_power_w()
+            power_w_avg = (
+                (power_pre + power_post) / 2.0
+                if power_pre is not None and power_post is not None else None
+            )
+            useful_macs = 2 * s * s * s
+            g_mac_per_sec = useful_macs / (median_ms * 1e-3) / 1e9
+            joules_per_mac = (
+                power_w_avg * (median_ms * 1e-3) / float(useful_macs)
+                if power_w_avg is not None else None
+            )
+            results.append(BenchResult(
+                schema_version=SCHEMA_VERSION, device="RTX5090",
+                device_detail={
+                    **base_detail,
+                    "backend_detail": {
+                        "dispatch": (
+                            f"{n_gemms} × torch._int_mm + int64 per-partial "
+                            f"scale/mod + final % q (KLSS-IP MAC view)"
+                        ),
+                        "n_int8_gemms": n_gemms,
+                        "n_chunks": n_chunks,
+                    },
+                },
+                layer="D", backend="cublaslt_int8",
+                shape={"M": s, "K": s, "N": s},
+                dtype_in="int8", dtype_acc="int32",
+                iters=LAYER_C_ITERS["iters"],
+                warmup=LAYER_C_ITERS["warmup"],
+                median_ms=median_ms, p10_ms=p10, p90_ms=p90,
+                useful_ops=useful_macs,
+                useful_op_kind=op_kind,
+                throughput=g_mac_per_sec,
+                throughput_unit="G_MAC/s",
+                correctness={
+                    "gate": "passed",
+                    "edge_cases_passed": gate.edge_cases_passed,
+                },
+                host_overhead_ms=None,
+                git_sha=sha, timestamp=ts,
+                power_w_avg=power_w_avg,
+                joules_per_useful_op=joules_per_mac,
+            ))
+            del step
+            torch.cuda.empty_cache()
+    return results
+
+
 def cpu_int128_baseline_record(n: int = 100_000) -> BenchResult:
     """CPU bigint elementwise modmul, single record. Establishes the floor."""
     sha, ts = git_sha(), now_iso()
@@ -659,8 +784,8 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="RTX 5090 cuBLASLt benchmark, BENCHMARK.md §4 v1.")
     p.add_argument("--out", required=True, type=Path, help="JSONL output path.")
     p.add_argument(
-        "--layers", default="A,B,C",
-        help="Comma-separated subset of {A,B,C}. Default: A,B,C.",
+        "--layers", default="A,B,C,D",
+        help="Comma-separated subset of {A,B,C,D}. Default: A,B,C,D.",
     )
     p.add_argument(
         "--sizes", default=None,
@@ -720,6 +845,10 @@ def main(argv: list[str] | None = None) -> int:
         if not args.no_cpu:
             print("CPU bigint baseline…")
             all_results.append(cpu_int128_baseline_record())
+    if "D" in layers:
+        prime_label = ",".join(f"q{pb}" for pb in primes)
+        print(f"Layer D ({prime_label} KLSS-IP, useful MAC view)…")
+        all_results.extend(layer_d_klss_ip(sizes, primes=primes))
 
     write_results(all_results, args.out)
     print(f"\nwrote {len(all_results)} record(s) to {args.out}")
