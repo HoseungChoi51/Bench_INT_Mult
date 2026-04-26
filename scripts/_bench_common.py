@@ -29,7 +29,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"
 
 Layer = Literal["A", "B", "C"]
 UsefulOpKind = Literal[
@@ -83,6 +83,12 @@ class BenchResult:
     host_overhead_ms: float | None
     git_sha: str
     timestamp: str
+    # v2 (schema_version="2"): pre/post snapshot averaged board power in
+    # watts during the timed loop. None when telemetry was unavailable
+    # (no GPU NVML, no tt-smi, etc.). joules_per_useful_op is the
+    # convenience derived metric (power_w_avg * median_s / useful_ops).
+    power_w_avg: float | None = None
+    joules_per_useful_op: float | None = None
 
     def to_jsonl_line(self) -> str:
         return json.dumps(asdict(self), separators=(",", ":"))
@@ -295,6 +301,69 @@ def q48_ntt_friendly_prime() -> int:
     48 bits wide, primality verified by deterministic Miller-Rabin.
     """
     return 0xFFFFFFFA0001
+
+
+# --- Power telemetry --------------------------------------------------------
+
+
+def read_tt_power_w() -> float | None:
+    """Snapshot board power (W) from tt-smi. Returns None if unavailable.
+
+    `tt-smi -s` dumps the SMBus telemetry block as JSON to stdout. The TDP
+    field is a hex-encoded watts value (e.g. ``"0x2d" → 45 W``). We parse
+    the first device's TDP. Cheap (~30 ms invocation cost), accurate
+    enough for pre/post-loop snapshots that span seconds.
+    """
+    try:
+        out = subprocess.run(
+            ["tt-smi", "-s"], capture_output=True, text=True, check=False, timeout=10
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    if out.returncode != 0 or not out.stdout.strip():
+        return None
+    try:
+        data = json.loads(out.stdout)
+        devices = data.get("device_info") or []
+        if not devices:
+            return None
+        tdp_hex = devices[0].get("smbus_telem", {}).get("TDP")
+        if tdp_hex is None:
+            return None
+        return float(int(tdp_hex, 16))
+    except (json.JSONDecodeError, KeyError, ValueError, TypeError):
+        return None
+
+
+def read_nvidia_power_w(device_index: int = 0) -> float | None:
+    """Snapshot board power (W) from NVML. Returns None if pynvml unavailable.
+
+    nvmlDeviceGetPowerUsage returns mW, we convert to W. Identical
+    pre/post snapshot model as :func:`read_tt_power_w`. Falls back to
+    `nvidia-smi --query-gpu=power.draw --format=csv,noheader,nounits`
+    if pynvml isn't importable (more portable on minimal CUDA installs).
+    """
+    try:
+        import pynvml
+        pynvml.nvmlInit()
+        try:
+            h = pynvml.nvmlDeviceGetHandleByIndex(device_index)
+            return float(pynvml.nvmlDeviceGetPowerUsage(h)) / 1000.0
+        finally:
+            pynvml.nvmlShutdown()
+    except (ImportError, Exception):  # noqa: BLE001 — NVMLError is dynamic
+        pass
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", f"--id={device_index}",
+             "--query-gpu=power.draw", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, check=False, timeout=5,
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            return float(out.stdout.strip().split()[0])
+    except (FileNotFoundError, subprocess.TimeoutExpired, ValueError):
+        pass
+    return None
 
 
 # --- Device price registry -------------------------------------------------

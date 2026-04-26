@@ -1,10 +1,10 @@
 # Bench summary — RTX 5090 vs TT Blackhole
 
-- **Schema version**: 1
+- **Schema versions present**: 1, 2
 - **Devices**: Blackhole, CPU, RTX5090
 - **Records**: 64
-- **Timestamps**: 2026-04-26T17:45:10+00:00 – 2026-04-26T20:04:50+00:00
-- **Git SHAs**: f6da9df, fa2e772
+- **Timestamps**: 2026-04-26T17:45:10+00:00 – 2026-04-26T20:31:07+00:00
+- **Git SHAs**: 75ccd37, fa2e772
 
 ## Device prices (declared, not detected)
 
@@ -19,13 +19,13 @@ Update :data:`DEVICE_PRICES_USD` in `scripts/_bench_common.py` if these are stal
 ## Layer A — capability probe
 ### Layer A
 
-| op_kind | shape | backend | Blackhole thr | Blackhole /k$ | Blackhole gate | RTX5090 thr | RTX5090 /k$ | RTX5090 gate |
-|---|---|---|---|---|---|---|---|---|
-| gemm_mac | 1024×1024×1024 | bf16 | 3.65 TFLOPS | 3.656 /k$ | skipped | — | — | — |
-| gemm_mac | 1024×1024×1024 | fp32 | — | — | skipped | 48.19 TFLOPS | 24.109 /k$ | skipped |
-| gemm_mac | 1024×1024×1024 | fp64 | — | — | — | 1.49 TFLOPS | 0.747 /k$ | skipped |
-| gemm_mac | 1024×1024×1024 | int8 | 6.49 TOPS | 6.492 /k$ | skipped | 76.35 TOPS | 38.193 /k$ | skipped |
-| gemm_mac | 1024×1024×1024 | tf32 | 1.89 TFLOPS | 1.891 /k$ | skipped | 76.87 TFLOPS | 38.455 /k$ | skipped |
+| op_kind | shape | backend | Blackhole thr | Blackhole /k$ | Blackhole W | Blackhole thr/W | Blackhole gate | RTX5090 thr | RTX5090 /k$ | RTX5090 W | RTX5090 thr/W | RTX5090 gate |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| gemm_mac | 1024×1024×1024 | bf16 | 3.66 TFLOPS | 3.663 /k$ | 43.0 W | 0.085 TFLOPS/W | skipped | — | — | — | — | — |
+| gemm_mac | 1024×1024×1024 | fp32 | — | — | 44.5 W | — | skipped | 48.19 TFLOPS | 24.109 /k$ | — | — | skipped |
+| gemm_mac | 1024×1024×1024 | fp64 | — | — | — | — | — | 1.49 TFLOPS | 0.747 /k$ | — | — | skipped |
+| gemm_mac | 1024×1024×1024 | int8 | 6.49 TOPS | 6.495 /k$ | 43.5 W | 0.149 TOPS/W | skipped | 76.35 TOPS | 38.193 /k$ | — | — | skipped |
+| gemm_mac | 1024×1024×1024 | tf32 | 1.89 TFLOPS | 1.894 /k$ | 45.0 W | 0.042 TFLOPS/W | skipped | 76.87 TFLOPS | 38.455 /k$ | — | — | skipped |
 
 **Cross-device throughput ratios** (higher = first device wins):
 
@@ -37,33 +37,33 @@ Update :data:`DEVICE_PRICES_USD` in `scripts/_bench_common.py` if these are stal
 ## Layer B — raw GEMM
 ### Layer B
 
-| op_kind | shape | backend | Blackhole thr | Blackhole /k$ | Blackhole gate | RTX5090 thr | RTX5090 /k$ | RTX5090 gate |
-|---|---|---|---|---|---|---|---|---|
-| gemm_mac | 1024×1024×1024 | bf16 | 3.66 TFLOPS | 3.661 /k$ | skipped | — | — | — |
-| gemm_mac | 1024×1024×1024 | fp32 | — | — | skipped | 48.06 TFLOPS | 24.040 /k$ | skipped |
-| gemm_mac | 1024×1024×1024 | fp64 | — | — | — | 1.45 TFLOPS | 0.727 /k$ | skipped |
-| gemm_mac | 1024×1024×1024 | int8 | 6.49 TOPS | 6.492 /k$ | skipped | 76.43 TOPS | 38.236 /k$ | skipped |
-| gemm_mac | 1024×1024×1024 | tf32 | 1.89 TFLOPS | 1.892 /k$ | skipped | 76.96 TFLOPS | 38.499 /k$ | skipped |
-| gemm_mac | 2048×2048×2048 | bf16 | 3.85 TFLOPS | 3.850 /k$ | skipped | — | — | — |
-| gemm_mac | 2048×2048×2048 | fp32 | — | — | skipped | 67.75 TFLOPS | 33.893 /k$ | skipped |
-| gemm_mac | 2048×2048×2048 | fp64 | — | — | — | 1.38 TFLOPS | 0.689 /k$ | skipped |
-| gemm_mac | 2048×2048×2048 | int8 | 7.36 TOPS | 7.363 /k$ | skipped | 179.74 TOPS | 89.913 /k$ | skipped |
-| gemm_mac | 2048×2048×2048 | tf32 | 1.96 TFLOPS | 1.963 /k$ | skipped | 89.43 TFLOPS | 44.736 /k$ | skipped |
-| gemm_mac | 4096×4096×4096 | bf16 | 3.91 TFLOPS | 3.916 /k$ | skipped | — | — | — |
-| gemm_mac | 4096×4096×4096 | fp32 | — | — | skipped | 58.57 TFLOPS | 29.299 /k$ | skipped |
-| gemm_mac | 4096×4096×4096 | fp64 | — | — | — | 1.49 TFLOPS | 0.747 /k$ | skipped |
-| gemm_mac | 4096×4096×4096 | int8 | 7.57 TOPS | 7.582 /k$ | skipped | 214.53 TOPS | 107.321 /k$ | skipped |
-| gemm_mac | 4096×4096×4096 | tf32 | 1.98 TFLOPS | 1.978 /k$ | skipped | 102.59 TFLOPS | 51.319 /k$ | skipped |
-| gemm_mac | 512×512×512 | bf16 | 2.49 TFLOPS | 2.491 /k$ | skipped | — | — | — |
-| gemm_mac | 512×512×512 | fp32 | — | — | skipped | 8.90 TFLOPS | 4.450 /k$ | skipped |
-| gemm_mac | 512×512×512 | fp64 | — | — | — | 1.02 TFLOPS | 0.510 /k$ | skipped |
-| gemm_mac | 512×512×512 | int8 | 3.67 TOPS | 3.675 /k$ | skipped | 17.15 TOPS | 8.582 /k$ | skipped |
-| gemm_mac | 512×512×512 | tf32 | 1.51 TFLOPS | 1.515 /k$ | skipped | 9.75 TFLOPS | 4.880 /k$ | skipped |
-| gemm_mac | 8192×8192×8192 | bf16 | 3.89 TFLOPS | 3.892 /k$ | skipped | — | — | — |
-| gemm_mac | 8192×8192×8192 | fp32 | — | — | skipped | 61.69 TFLOPS | 30.862 /k$ | skipped |
-| gemm_mac | 8192×8192×8192 | fp64 | — | — | — | 1.58 TFLOPS | 0.792 /k$ | skipped |
-| gemm_mac | 8192×8192×8192 | int8 | 7.39 TOPS | 7.402 /k$ | skipped | 210.11 TOPS | 105.105 /k$ | skipped |
-| gemm_mac | 8192×8192×8192 | tf32 | 1.92 TFLOPS | 1.918 /k$ | skipped | 100.87 TFLOPS | 50.462 /k$ | skipped |
+| op_kind | shape | backend | Blackhole thr | Blackhole /k$ | Blackhole W | Blackhole thr/W | Blackhole gate | RTX5090 thr | RTX5090 /k$ | RTX5090 W | RTX5090 thr/W | RTX5090 gate |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| gemm_mac | 1024×1024×1024 | bf16 | 3.65 TFLOPS | 3.651 /k$ | 44.5 W | 0.082 TFLOPS/W | skipped | — | — | — | — | — |
+| gemm_mac | 1024×1024×1024 | fp32 | — | — | 45.5 W | — | skipped | 48.06 TFLOPS | 24.040 /k$ | — | — | skipped |
+| gemm_mac | 1024×1024×1024 | fp64 | — | — | — | — | — | 1.45 TFLOPS | 0.727 /k$ | — | — | skipped |
+| gemm_mac | 1024×1024×1024 | int8 | 6.48 TOPS | 6.490 /k$ | 45.5 W | 0.142 TOPS/W | skipped | 76.43 TOPS | 38.236 /k$ | — | — | skipped |
+| gemm_mac | 1024×1024×1024 | tf32 | 1.89 TFLOPS | 1.891 /k$ | 45.5 W | 0.042 TFLOPS/W | skipped | 76.96 TFLOPS | 38.499 /k$ | — | — | skipped |
+| gemm_mac | 2048×2048×2048 | bf16 | 3.85 TFLOPS | 3.857 /k$ | 44.5 W | 0.087 TFLOPS/W | skipped | — | — | — | — | — |
+| gemm_mac | 2048×2048×2048 | fp32 | — | — | 44.5 W | — | skipped | 67.75 TFLOPS | 33.893 /k$ | — | — | skipped |
+| gemm_mac | 2048×2048×2048 | fp64 | — | — | — | — | — | 1.38 TFLOPS | 0.689 /k$ | — | — | skipped |
+| gemm_mac | 2048×2048×2048 | int8 | 7.31 TOPS | 7.319 /k$ | 46.0 W | 0.159 TOPS/W | skipped | 179.74 TOPS | 89.913 /k$ | — | — | skipped |
+| gemm_mac | 2048×2048×2048 | tf32 | 1.96 TFLOPS | 1.964 /k$ | 45.5 W | 0.043 TFLOPS/W | skipped | 89.43 TFLOPS | 44.736 /k$ | — | — | skipped |
+| gemm_mac | 4096×4096×4096 | bf16 | 3.90 TFLOPS | 3.905 /k$ | 44.5 W | 0.088 TFLOPS/W | skipped | — | — | — | — | — |
+| gemm_mac | 4096×4096×4096 | fp32 | — | — | 45.5 W | — | skipped | 58.57 TFLOPS | 29.299 /k$ | — | — | skipped |
+| gemm_mac | 4096×4096×4096 | fp64 | — | — | — | — | — | 1.49 TFLOPS | 0.747 /k$ | — | — | skipped |
+| gemm_mac | 4096×4096×4096 | int8 | 7.57 TOPS | 7.579 /k$ | 46.0 W | 0.165 TOPS/W | skipped | 214.53 TOPS | 107.321 /k$ | — | — | skipped |
+| gemm_mac | 4096×4096×4096 | tf32 | 1.97 TFLOPS | 1.972 /k$ | 46.0 W | 0.043 TFLOPS/W | skipped | 102.59 TFLOPS | 51.319 /k$ | — | — | skipped |
+| gemm_mac | 512×512×512 | bf16 | 2.48 TFLOPS | 2.483 /k$ | 44.5 W | 0.056 TFLOPS/W | skipped | — | — | — | — | — |
+| gemm_mac | 512×512×512 | fp32 | — | — | 45.5 W | — | skipped | 8.90 TFLOPS | 4.450 /k$ | — | — | skipped |
+| gemm_mac | 512×512×512 | fp64 | — | — | — | — | — | 1.02 TFLOPS | 0.510 /k$ | — | — | skipped |
+| gemm_mac | 512×512×512 | int8 | 3.67 TOPS | 3.671 /k$ | 46.0 W | 0.080 TOPS/W | skipped | 17.15 TOPS | 8.582 /k$ | — | — | skipped |
+| gemm_mac | 512×512×512 | tf32 | 1.51 TFLOPS | 1.515 /k$ | 46.0 W | 0.033 TFLOPS/W | skipped | 9.75 TFLOPS | 4.880 /k$ | — | — | skipped |
+| gemm_mac | 8192×8192×8192 | bf16 | 3.89 TFLOPS | 3.893 /k$ | 45.0 W | 0.086 TFLOPS/W | skipped | — | — | — | — | — |
+| gemm_mac | 8192×8192×8192 | fp32 | — | — | 44.5 W | — | skipped | 61.69 TFLOPS | 30.862 /k$ | — | — | skipped |
+| gemm_mac | 8192×8192×8192 | fp64 | — | — | — | — | — | 1.58 TFLOPS | 0.792 /k$ | — | — | skipped |
+| gemm_mac | 8192×8192×8192 | int8 | 7.39 TOPS | 7.402 /k$ | 46.0 W | 0.161 TOPS/W | skipped | 210.11 TOPS | 105.105 /k$ | — | — | skipped |
+| gemm_mac | 8192×8192×8192 | tf32 | 1.92 TFLOPS | 1.918 /k$ | 46.0 W | 0.042 TFLOPS/W | skipped | 100.87 TFLOPS | 50.462 /k$ | — | — | skipped |
 
 **Cross-device throughput ratios** (higher = first device wins):
 
@@ -83,19 +83,19 @@ Update :data:`DEVICE_PRICES_USD` in `scripts/_bench_common.py` if these are stal
 ## Layer C — exact 36-bit modular product
 ### Layer C
 
-| op_kind | shape | backend | Blackhole thr | Blackhole /k$ | Blackhole gate | CPU thr | CPU /k$ | CPU gate | RTX5090 thr | RTX5090 /k$ | RTX5090 gate |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| exact_modmul_q36 | 100000×1×1 | cpu | — | — | — | 0.01 G_modmul/s | — | passed | — | — | — |
-| exact_modmul_q36 | 1024×1024×1024 | int8 | 0.14 G_modmul/s | 0.136 /k$ | passed | — | — | — | 0.84 G_modmul/s | 0.422 /k$ | passed |
-| exact_modmul_q36 | 2048×2048×2048 | int8 | 0.07 G_modmul/s | 0.073 /k$ | passed | — | — | — | 0.85 G_modmul/s | 0.426 /k$ | passed |
-| exact_modmul_q36 | 4096×4096×4096 | int8 | 0.04 G_modmul/s | 0.037 /k$ | passed | — | — | — | 0.45 G_modmul/s | 0.224 /k$ | passed |
-| exact_modmul_q36 | 512×512×512 | int8 | 0.21 G_modmul/s | 0.208 /k$ | passed | — | — | — | 0.34 G_modmul/s | 0.169 /k$ | passed |
-| exact_modmul_q36 | 8192×8192×8192 | int8 | 0.02 G_modmul/s | 0.018 /k$ | passed | — | — | — | 0.33 G_modmul/s | 0.163 /k$ | passed |
-| exact_modmul_q48 | 1024×1024×1024 | int8 | 0.09 G_modmul/s | 0.094 /k$ | passed | — | — | — | — | — | — |
-| exact_modmul_q48 | 2048×2048×2048 | int8 | 0.05 G_modmul/s | 0.050 /k$ | passed | — | — | — | — | — | — |
-| exact_modmul_q48 | 4096×4096×4096 | int8 | 0.03 G_modmul/s | 0.026 /k$ | passed | — | — | — | — | — | — |
-| exact_modmul_q48 | 512×512×512 | int8 | 0.15 G_modmul/s | 0.146 /k$ | passed | — | — | — | — | — | — |
-| exact_modmul_q48 | 8192×8192×8192 | int8 | 0.01 G_modmul/s | 0.013 /k$ | passed | — | — | — | — | — | — |
+| op_kind | shape | backend | Blackhole thr | Blackhole /k$ | Blackhole W | Blackhole thr/W | Blackhole gate | CPU thr | CPU /k$ | CPU W | CPU thr/W | CPU gate | RTX5090 thr | RTX5090 /k$ | RTX5090 W | RTX5090 thr/W | RTX5090 gate |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| exact_modmul_q36 | 100000×1×1 | cpu | — | — | — | — | — | 0.01 G_modmul/s | — | — | — | passed | — | — | — | — | — |
+| exact_modmul_q36 | 1024×1024×1024 | int8 | 0.14 G_modmul/s | 0.136 /k$ | 46.0 W | 0.003 G_modmul/s/W | passed | — | — | — | — | — | 0.84 G_modmul/s | 0.422 /k$ | — | — | passed |
+| exact_modmul_q36 | 2048×2048×2048 | int8 | 0.07 G_modmul/s | 0.073 /k$ | 44.5 W | 0.002 G_modmul/s/W | passed | — | — | — | — | — | 0.85 G_modmul/s | 0.426 /k$ | — | — | passed |
+| exact_modmul_q36 | 4096×4096×4096 | int8 | 0.04 G_modmul/s | 0.037 /k$ | 46.0 W | 0.001 G_modmul/s/W | passed | — | — | — | — | — | 0.45 G_modmul/s | 0.224 /k$ | — | — | passed |
+| exact_modmul_q36 | 512×512×512 | int8 | 0.21 G_modmul/s | 0.209 /k$ | 46.0 W | 0.005 G_modmul/s/W | passed | — | — | — | — | — | 0.34 G_modmul/s | 0.169 /k$ | — | — | passed |
+| exact_modmul_q36 | 8192×8192×8192 | int8 | 0.02 G_modmul/s | 0.018 /k$ | 45.0 W | 0.000 G_modmul/s/W | passed | — | — | — | — | — | 0.33 G_modmul/s | 0.163 /k$ | — | — | passed |
+| exact_modmul_q48 | 1024×1024×1024 | int8 | 0.09 G_modmul/s | 0.094 /k$ | 45.0 W | 0.002 G_modmul/s/W | passed | — | — | — | — | — | — | — | — | — | — |
+| exact_modmul_q48 | 2048×2048×2048 | int8 | 0.05 G_modmul/s | 0.050 /k$ | 44.5 W | 0.001 G_modmul/s/W | passed | — | — | — | — | — | — | — | — | — | — |
+| exact_modmul_q48 | 4096×4096×4096 | int8 | 0.03 G_modmul/s | 0.026 /k$ | 45.0 W | 0.001 G_modmul/s/W | passed | — | — | — | — | — | — | — | — | — | — |
+| exact_modmul_q48 | 512×512×512 | int8 | 0.15 G_modmul/s | 0.146 /k$ | 44.0 W | 0.003 G_modmul/s/W | passed | — | — | — | — | — | — | — | — | — | — |
+| exact_modmul_q48 | 8192×8192×8192 | int8 | 0.01 G_modmul/s | 0.013 /k$ | 45.0 W | 0.000 G_modmul/s/W | passed | — | — | — | — | — | — | — | — | — | — |
 
 **Cross-device throughput ratios** (higher = first device wins):
 
