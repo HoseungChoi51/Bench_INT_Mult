@@ -89,6 +89,30 @@ def _fmt_per_dollar(r: dict[str, Any]) -> str:
     return f"{thr / price * 1000:.3f} /k$"
 
 
+def _shape_sort_key(s: str) -> tuple[int, int, int]:
+    """Sort '512×512×512' before '1024×1024×1024' (numeric, not lexical)."""
+    try:
+        m, k, n = (int(x) for x in s.replace("x", "×").split("×"))
+        return (m, k, n)
+    except ValueError:
+        return (0, 0, 0)
+
+
+def _select_headline_devices(devices: list[str]) -> tuple[str, str] | None:
+    """Pick the two GPU devices for the cross-device ratio. Skip CPU.
+
+    Preferred ordering: RTX5090 first (it's the asking-price baseline),
+    Blackhole second (the price-challenger). Fall back to any two non-CPU
+    devices if the canonical pair isn't present.
+    """
+    non_cpu = [d for d in devices if d != "CPU"]
+    if "RTX5090" in non_cpu and "Blackhole" in non_cpu:
+        return "RTX5090", "Blackhole"
+    if len(non_cpu) >= 2:
+        return non_cpu[0], non_cpu[1]
+    return None
+
+
 def render_layer(records: list[dict[str, Any]], layer: str) -> str:
     """One markdown table per layer, joined on (op_kind, shape, backend_class)."""
     layer_records = [r for r in records if r.get("layer") == layer]
@@ -112,7 +136,8 @@ def render_layer(records: list[dict[str, Any]], layer: str) -> str:
     out.append("| " + " | ".join(header) + " |")
     out.append("|" + "|".join(["---"] * len(header)) + "|")
 
-    for key in sorted(rows.keys()):
+    sorted_keys = sorted(rows.keys(), key=lambda k: (k[0], _shape_sort_key(k[1]), k[2]))
+    for key in sorted_keys:
         op_kind, shape, bclass = key
         row = [op_kind, shape, bclass]
         for d in devices:
@@ -123,36 +148,159 @@ def render_layer(records: list[dict[str, Any]], layer: str) -> str:
                 row += [_fmt_thr(r), _fmt_per_dollar(r), r["correctness"].get("gate", "—")]
         out.append("| " + " | ".join(row) + " |")
 
-    # Cross-device throughput ratio per row, only meaningful when ≥2 devices match.
-    if len(devices) >= 2:
+    pair = _select_headline_devices(devices)
+    if pair is not None:
         out.append("")
-        out.append("**Cross-device throughput ratios** (higher = first device wins):")
+        out.append(_render_ratio_section(layer_records, pair))
+
+    out.append("")
+    return "\n".join(out)
+
+
+def _render_ratio_section(
+    layer_records: list[dict[str, Any]], pair: tuple[str, str]
+) -> str:
+    """Render two cross-device ratio tables for the given GPU pair.
+
+    1. **Best-of-device** (always shown): one row per (op_kind, shape),
+       picking the best-throughput backend per device. Answers "which
+       device delivers the most throughput at this shape, at any
+       precision the device supports?" — the right headline when not
+       every backend is implemented on every device yet (e.g., TT-LLK
+       INT8 is still TODO in v1).
+
+    2. **Per-matching-backend** (shown only if any matches exist): joins
+       on exact backend_class, like-for-like precision. Useful once both
+       sides have the same backend(s) implemented.
+
+    Note: backend_class collapses device-specific names (cublaslt_int8,
+    tt_llk_int8 → "int8"). FP64 is matched only against another FP64,
+    BF16 against BF16, and so on; cross-precision comparisons stay in
+    table 1.
+    """
+    d0, d1 = pair
+    p0 = DEVICE_PRICES_USD.get(d0, 0.0)
+    p1 = DEVICE_PRICES_USD.get(d1, 0.0)
+
+    # Group records by (op_kind, shape) device-side, dropping nulls.
+    grouped: dict[tuple[str, str], dict[str, list[dict[str, Any]]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    for r in layer_records:
+        if r["device"] not in pair:
+            continue
+        if r.get("throughput") is None:
+            continue
+        key = (r["useful_op_kind"], shape_key(r["shape"]))
+        grouped[key][r["device"]].append(r)
+
+    sorted_keys = sorted(grouped.keys(), key=lambda k: (k[0], _shape_sort_key(k[1])))
+
+    out: list[str] = []
+    out.append(f"**Headline ratios — {d0} vs {d1}, best backend per device** "
+               f"(higher = {d0} wins):")
+    out.append("")
+    out.append(
+        f"| op_kind | shape | {d0} best | {d1} best | {d0} / {d1} "
+        f"| price-adjusted ({d0} /k$) / ({d1} /k$) |"
+    )
+    out.append("|---|---|---|---|---|---|")
+    any_headline = False
+    for (op_kind, shape) in sorted_keys:
+        by_dev = grouped[(op_kind, shape)]
+        recs0 = by_dev.get(d0, [])
+        recs1 = by_dev.get(d1, [])
+        if not recs0 or not recs1:
+            continue
+        r0 = max(recs0, key=lambda r: r["throughput"])
+        r1 = max(recs1, key=lambda r: r["throughput"])
+        ratio = r0["throughput"] / r1["throughput"]
+        adj = "—"
+        if p0 > 0 and p1 > 0:
+            adj = f"{(r0['throughput'] / p0) / (r1['throughput'] / p1):.2f}×"
+        bc0 = backend_class(r0["backend"])
+        bc1 = backend_class(r1["backend"])
+        out.append(
+            f"| {op_kind} | {shape} | {bc0} ({_fmt_thr(r0)}) "
+            f"| {bc1} ({_fmt_thr(r1)}) | {ratio:.2f}× | {adj} |"
+        )
+        any_headline = True
+    if not any_headline:
+        out.append(f"| _no overlapping records between {d0} and {d1}_ | | | | | |")
+
+    # Per-backend-class table (only emitted if there is at least one match).
+    matched_rows: list[str] = []
+    for (op_kind, shape) in sorted_keys:
+        by_dev = grouped[(op_kind, shape)]
+        recs0 = by_dev.get(d0, [])
+        recs1 = by_dev.get(d1, [])
+        if not recs0 or not recs1:
+            continue
+        by_bc0 = {backend_class(r["backend"]): r for r in recs0}
+        by_bc1 = {backend_class(r["backend"]): r for r in recs1}
+        for bc in sorted(set(by_bc0) & set(by_bc1)):
+            r0 = by_bc0[bc]
+            r1 = by_bc1[bc]
+            ratio = r0["throughput"] / r1["throughput"]
+            adj = "—"
+            if p0 > 0 and p1 > 0:
+                adj = f"{(r0['throughput'] / p0) / (r1['throughput'] / p1):.2f}×"
+            matched_rows.append(
+                f"| {op_kind} | {shape} | {bc} | {ratio:.2f}× | {adj} |"
+            )
+
+    if matched_rows:
         out.append("")
-        d0, d1 = devices[0], devices[1]
+        out.append(f"**Per-matching-backend ratios — {d0} vs {d1}** "
+                   "(only shown where both devices have the backend implemented):")
+        out.append("")
         out.append(
             f"| op_kind | shape | backend | {d0} / {d1} "
             f"| price-adjusted ({d0} /k$) / ({d1} /k$) |"
         )
         out.append("|---|---|---|---|---|")
-        for key in sorted(rows.keys()):
-            op_kind, shape, bclass = key
-            r0 = rows[key].get(d0)
-            r1 = rows[key].get(d1)
-            t0 = r0.get("throughput") if r0 else None
-            t1 = r1.get("throughput") if r1 else None
-            if t0 is None or t1 is None:
-                continue
-            ratio = r0["throughput"] / r1["throughput"]
-            p0 = DEVICE_PRICES_USD.get(d0, 0.0)
-            p1 = DEVICE_PRICES_USD.get(d1, 0.0)
-            adj_str = "—"
-            if p0 > 0 and p1 > 0:
-                adj = (r0["throughput"] / p0) / (r1["throughput"] / p1)
-                adj_str = f"{adj:.2f}×"
-            out.append(f"| {op_kind} | {shape} | {bclass} | {ratio:.2f}× | {adj_str} |")
+        out.extend(matched_rows)
 
-    out.append("")
     return "\n".join(out)
+
+
+def _render_plots_section() -> list[str]:
+    """Reference the PNGs `scripts/plot_summary.py` writes to the same dir.
+
+    Each link is wrapped in a check that gracefully degrades if the PNG
+    isn't there (rendered to plain text — GitHub markdown handles this).
+    The expected output directory is the same one this script writes to.
+    """
+    plots = [
+        ("Layer C — exact 36-bit modmul throughput",
+         "layer_c_modmul.png",
+         "Best backend per device. The headline FHE-relevance plot."),
+        ("Layer C — exact 36-bit modmul per dollar",
+         "layer_c_modmul_per_dollar.png",
+         "Same data, normalized by device MSRP. Answers the price-ratio question."),
+        ("Layer B — raw GEMM throughput",
+         "layer_b_throughput.png",
+         "Per (device, backend), log-y. Shows the full precision-vs-throughput envelope."),
+        ("Headline at 4096³",
+         "headline_4096.png",
+         "Side-by-side bar chart at one representative shape."),
+    ]
+    out: list[str] = []
+    out.append("## Plots")
+    out.append("")
+    out.append(
+        "Generated by `scripts/plot_summary.py` from the same JSONL "
+        "files as this summary. Re-run after each bench refresh."
+    )
+    out.append("")
+    for title, fname, caption in plots:
+        out.append(f"### {title}")
+        out.append("")
+        out.append(f"![{title}]({fname})")
+        out.append("")
+        out.append(f"_{caption}_")
+        out.append("")
+    return out
 
 
 def render_summary(records: list[dict[str, Any]]) -> str:
@@ -190,6 +338,8 @@ def render_summary(records: list[dict[str, Any]]) -> str:
     )
     lines.append("")
 
+    lines.extend(_render_plots_section())
+
     lines.append("## Layer A — capability probe")
     lines.append(render_layer(records, "A") or "_no Layer A records_\n")
     lines.append("## Layer B — raw GEMM")
@@ -210,6 +360,7 @@ def render_summary(records: list[dict[str, Any]]) -> str:
     lines.append("")
     lines.append("# Then back on this machine:")
     lines.append("python scripts/compare.py bench-results/*.jsonl --out bench-results/SUMMARY.md")
+    lines.append("python scripts/plot_summary.py bench-results/*.jsonl --out-dir bench-results/")
     lines.append("```")
     lines.append("")
 
