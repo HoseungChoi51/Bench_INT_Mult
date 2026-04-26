@@ -36,3 +36,11 @@ htmlcov/
 
 # Tenstorrent ttnn runtime artifacts (produced by tests/test_blackhole_ttnn.py)
 generated/
+
+# Benchmark outputs: raw JSONL is gitignored; SUMMARY.md is tracked.
+bench-results/*
+!bench-results/SUMMARY.md
+!bench-results/.gitkeep
+
+# TT-LLK skeleton build artifacts (compiled on the TT host).
+tt-llk-skeleton/build/

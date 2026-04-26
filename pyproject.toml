@@ -18,6 +18,7 @@ dependencies = [
 [project.optional-dependencies]
 bench = [
     "torch>=2.11.0",
+    "nvmath-python>=0.9.0",
 ]
 
 [build-system]
