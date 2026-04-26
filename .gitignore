@@ -33,3 +33,6 @@ htmlcov/
 .vscode/
 .idea/
 .DS_Store
+
+# Tenstorrent ttnn runtime artifacts (produced by tests/test_blackhole_ttnn.py)
+generated/
