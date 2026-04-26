@@ -8,15 +8,18 @@
 // Layer A — single matmul, capability probe.
 // Layer B — single matmul, raw GEMM throughput.
 // Layer C — 25 matmuls (the byte-decomposition recipe of BENCHMARK.md §4),
-//           wall-clock includes all 25 dispatches. The on-device output is
-//           BF16 (tt_llk_bf16) and is *not* used as the modular result; the
-//           recipe's correctness is checked once on host bigint reference
-//           inside bench_blackhole.py. The Blackhole row therefore reports
+//           wall-clock includes all 25 dispatches. Cost-proxy: the on-device
+//           output is *not* used as the modular result; the recipe's
+//           correctness is checked once on the host bigint reference inside
+//           bench_blackhole.py. The Blackhole row therefore reports
 //           "exact 36-bit modmul throughput estimated from the cost of the
 //           25-GEMM cascade", documented in device_detail.note.
 //
-// Build via the sibling Makefile / host/CMakeLists.txt against an installed
-// tt-metalium (built from /home/chs/TT/tt-metal/build_Release on this host).
+// Backends:
+//   tt_llk_bf16  — Float16_b inputs/outputs, fp16 dst accumulator.
+//   tt_llk_int8  — Int8 inputs, Int8 packed output, int32 dst accumulator
+//                  (ComputeConfig.fp32_dest_acc_en = true).
+//   tt_llk_sfpu_fp32 — TODO; emits a clean "skipped" record.
 //
 // Stdout (one CSV line, this exact column order):
 //
@@ -71,6 +74,40 @@ constexpr int kLayerCGemmsPerIter = 25;
 // 32x32 tile.
 constexpr uint32_t kTile = TILE_HEIGHT;
 
+// Per-backend dispatch configuration. Keeps the matmul scaffolding identical
+// across BF16 / INT8 — only formats, tile bytes, and the int-accumulator flag
+// vary.
+struct BackendCfg {
+    DataFormat in_fmt;
+    DataFormat out_fmt;
+    uint32_t in_bytes;     // per-tile bytes for input CBs / DRAM buffers
+    uint32_t out_bytes;    // per-tile bytes for output CB / DRAM buffer
+    bool fp32_dest_acc;    // selects int32 / fp32 wide-dst accumulation
+    bool is_int8;          // gates the int8 host data path
+};
+
+BackendCfg backend_cfg_for(const std::string& backend) {
+    if (backend == "tt_llk_int8") {
+        return BackendCfg{
+            .in_fmt = DataFormat::Int8,
+            .out_fmt = DataFormat::Int8,
+            .in_bytes = static_cast<uint32_t>(sizeof(int8_t) * TILE_HW),    // 1024
+            .out_bytes = static_cast<uint32_t>(sizeof(int8_t) * TILE_HW),   // 1024
+            .fp32_dest_acc = true,
+            .is_int8 = true,
+        };
+    }
+    // Default: BF16 (the only other backend with a working compute kernel).
+    return BackendCfg{
+        .in_fmt = DataFormat::Float16_b,
+        .out_fmt = DataFormat::Float16_b,
+        .in_bytes = static_cast<uint32_t>(sizeof(bfloat16) * TILE_HW),  // 2048
+        .out_bytes = static_cast<uint32_t>(sizeof(bfloat16) * TILE_HW), // 2048
+        .fp32_dest_acc = false,
+        .is_int8 = false,
+    };
+}
+
 Args parse_args(int argc, char** argv) {
     Args a;
     for (int i = 1; i < argc; ++i) {
@@ -111,11 +148,11 @@ void emit_csv(double median_ms, double p10_ms, double p90_ms,
 
 void emit_skip(const char* err) { emit_csv(0, 0, 0, "?", 0, err); }
 
-// Build one BF16 matmul Program against the given inputs/outputs. Modeled on
-// tt_metal/programming_examples/matmul/matmul_multi_core; same kernel
-// structure (reader / writer / mm.cpp-style compute) but with our skeleton's
-// kernel files (absolute paths via KERNEL_DIR).
-Program build_bf16_matmul_program(
+// Build one matmul Program against the given inputs/outputs. Modeled on
+// tt_metal/programming_examples/matmul/matmul_multi_core; the per-backend
+// CB DataFormat / page_size and ComputeConfig.fp32_dest_acc_en come from cfg.
+Program build_matmul_program(
+    const BackendCfg& cfg,
     distributed::MeshDevice* device,
     const std::shared_ptr<distributed::MeshBuffer>& a_buf,
     const std::shared_ptr<distributed::MeshBuffer>& b_buf,
@@ -131,23 +168,20 @@ Program build_bf16_matmul_program(
           work_per_core1, work_per_core2] =
         split_work_to_cores(core_grid, num_output_tiles_total);
 
-    constexpr uint32_t single_tile_bytes = sizeof(bfloat16) * TILE_HW;  // 2 * 32 * 32 = 2048
-    constexpr DataFormat fmt = DataFormat::Float16_b;
-
     constexpr uint32_t cb_depth = 2;  // double-buffered
 
     CreateCircularBuffer(
         program, all_cores,
-        CircularBufferConfig(cb_depth * single_tile_bytes, {{CBIndex::c_0, fmt}})
-            .set_page_size(CBIndex::c_0, single_tile_bytes));
+        CircularBufferConfig(cb_depth * cfg.in_bytes, {{CBIndex::c_0, cfg.in_fmt}})
+            .set_page_size(CBIndex::c_0, cfg.in_bytes));
     CreateCircularBuffer(
         program, all_cores,
-        CircularBufferConfig(cb_depth * single_tile_bytes, {{CBIndex::c_1, fmt}})
-            .set_page_size(CBIndex::c_1, single_tile_bytes));
+        CircularBufferConfig(cb_depth * cfg.in_bytes, {{CBIndex::c_1, cfg.in_fmt}})
+            .set_page_size(CBIndex::c_1, cfg.in_bytes));
     CreateCircularBuffer(
         program, all_cores,
-        CircularBufferConfig(cb_depth * single_tile_bytes, {{CBIndex::c_16, fmt}})
-            .set_page_size(CBIndex::c_16, single_tile_bytes));
+        CircularBufferConfig(cb_depth * cfg.out_bytes, {{CBIndex::c_16, cfg.out_fmt}})
+            .set_page_size(CBIndex::c_16, cfg.out_bytes));
 
     std::vector<uint32_t> reader_cta;
     TensorAccessorArgs(*a_buf).append_to(reader_cta);
@@ -168,7 +202,11 @@ Program build_bf16_matmul_program(
 
     auto compute_kid = CreateKernel(
         program, compute_path, all_cores,
-        ComputeConfig{.math_fidelity = MathFidelity::HiFi4, .compile_args = {}});
+        ComputeConfig{
+            .math_fidelity = MathFidelity::HiFi4,
+            .fp32_dest_acc_en = cfg.fp32_dest_acc,
+            .compile_args = {},
+        });
 
     uint32_t work_offset = 0;
     auto work_groups = {
@@ -177,9 +215,8 @@ Program build_bf16_matmul_program(
     for (const auto& [ranges, work_per_core] : work_groups) {
         for (const auto& range : ranges.ranges()) {
             for (const auto& core : range) {
-                // DeviceAddr is a 64-bit type; explicitly truncate to the
-                // 32-bit runtime-arg slot. Buffers fit comfortably under 4 GiB
-                // on this device, so the cast is safe for our shapes.
+                // DeviceAddr is 64-bit; truncate to the 32-bit runtime-arg
+                // slot. Buffers fit comfortably under 4 GiB on this device.
                 const uint32_t a_addr = static_cast<uint32_t>(a_buf->address());
                 const uint32_t b_addr = static_cast<uint32_t>(b_buf->address());
                 const uint32_t c_addr = static_cast<uint32_t>(c_buf->address());
@@ -202,6 +239,53 @@ double percentile(std::vector<double> v, double q) {
     if (v.empty()) return 0.0;
     size_t idx = static_cast<size_t>(q * (v.size() - 1));
     return v[idx];
+}
+
+// Tilize an int8 row-major M×K matrix into the device's tile-row-major layout:
+// each 32x32 tile is 4 faces of 16x16, row-major within face, face order
+// TL/TR/BL/BR (matches the BF16 path used by tilize_nfaces<bfloat16>, just
+// without the standard-library template instantiation that doesn't ship for
+// int8_t — see /home/chs/TT/tt-metal/tt_metal/impl/data_format/tilize_utils.cpp:570-573).
+std::vector<int8_t> tilize_int8_nfaces(
+    const std::vector<int8_t>& src, uint32_t M, uint32_t K) {
+    constexpr uint32_t kFace = 16;
+    constexpr uint32_t kFaceArea = kFace * kFace;  // 256
+    const uint32_t Mt = M / kTile;
+    const uint32_t Kt = K / kTile;
+    std::vector<int8_t> dst(static_cast<size_t>(M) * K);
+
+    for (uint32_t mt = 0; mt < Mt; ++mt) {
+        for (uint32_t kt = 0; kt < Kt; ++kt) {
+            int8_t* tile = dst.data()
+                + (static_cast<size_t>(mt) * Kt + kt) * (kTile * kTile);
+            for (uint32_t face_id = 0; face_id < 4; ++face_id) {
+                const uint32_t face_row_off = (face_id / 2) * kFace;
+                const uint32_t face_col_off = (face_id % 2) * kFace;
+                int8_t* face_dst = tile + face_id * kFaceArea;
+                for (uint32_t fr = 0; fr < kFace; ++fr) {
+                    for (uint32_t fc = 0; fc < kFace; ++fc) {
+                        const uint32_t src_row = mt * kTile + face_row_off + fr;
+                        const uint32_t src_col = kt * kTile + face_col_off + fc;
+                        face_dst[fr * kFace + fc] =
+                            src[static_cast<size_t>(src_row) * K + src_col];
+                    }
+                }
+            }
+        }
+    }
+    return dst;
+}
+
+// Sign-magnitude conversion required by Tensix INT8 inputs (see
+// /home/chs/TT/tt-metal/tests/tt_metal/tt_metal/llk/test_single_core_matmul_int8.cpp::convert_to_sign_mag).
+// Two's-complement -v with v>0 → bit 7 set + magnitude.
+void convert_to_sign_mag(std::vector<int8_t>& v) {
+    for (auto& x : v) {
+        if (x < 0) {
+            const uint8_t mag = static_cast<uint8_t>(-static_cast<int>(x));
+            x = static_cast<int8_t>(0x80 | mag);
+        }
+    }
 }
 
 }  // namespace
@@ -231,11 +315,8 @@ int main(int argc, char** argv) {
     std::string arch_name;
     int n_cores = 0;
     try {
-        // Capture device metadata for the JSONL device_detail.
         const auto cg = mesh_device->compute_with_storage_grid_size();
         n_cores = static_cast<int>(cg.x * cg.y);
-        // Best-effort arch name; ARCH_NAME enum stringification is version-dependent.
-        // The wrapper substitutes the friendly "blackhole" if this comes back generic.
         arch_name = "blackhole";
     } catch (const std::exception& e) {
         emit_skip(e.what());
@@ -246,45 +327,65 @@ int main(int argc, char** argv) {
     const uint32_t Kt = args.K / kTile;
     const uint32_t Nt = args.N / kTile;
 
-    // Currently only the BF16 backend has a working compute kernel; the INT8
-    // and SFPU FP32 kernels remain TODO (see kernels/*.cpp). Surface a clean
-    // skip for unsupported backends so the wrapper marks the row appropriately.
-    if (args.backend == "tt_llk_int8" || args.backend == "tt_llk_sfpu_fp32") {
-        // mesh_device closes on shared_ptr destruction.
-        emit_skip("backend kernel TODO: see tt-llk-skeleton/kernels/*.cpp");
+    // SFPU FP32 backend's compute kernel is still a TODO (see
+    // kernels/compute_sfpu_fp32.cpp); surface a clean skip so the wrapper
+    // marks the row appropriately. INT8 + BF16 fall through to the dispatch.
+    if (args.backend == "tt_llk_sfpu_fp32") {
+        emit_skip("backend kernel TODO: see kernels/compute_sfpu_fp32.cpp");
         return 0;
     }
 
-    try {
-        // Allocate buffers + fill with deterministic random data once.
-        constexpr uint32_t single_tile_bytes = sizeof(bfloat16) * TILE_HW;
-        distributed::DeviceLocalBufferConfig dram_cfg{
-            .page_size = single_tile_bytes, .buffer_type = BufferType::DRAM};
+    const BackendCfg cfg = backend_cfg_for(args.backend);
 
-        auto make_buf = [&](uint32_t n_tiles) {
-            distributed::ReplicatedBufferConfig bcfg{.size = single_tile_bytes * n_tiles};
-            return distributed::MeshBuffer::create(bcfg, dram_cfg, mesh_device.get());
+    try {
+        // Allocate buffers with backend-specific tile sizes (BF16: 2048 B,
+        // INT8: 1024 B for inputs and packed output).
+        distributed::DeviceLocalBufferConfig dram_in_cfg{
+            .page_size = cfg.in_bytes, .buffer_type = BufferType::DRAM};
+        distributed::DeviceLocalBufferConfig dram_out_cfg{
+            .page_size = cfg.out_bytes, .buffer_type = BufferType::DRAM};
+
+        auto make_buf_in = [&](uint32_t n_tiles) {
+            distributed::ReplicatedBufferConfig bcfg{.size = cfg.in_bytes * n_tiles};
+            return distributed::MeshBuffer::create(bcfg, dram_in_cfg, mesh_device.get());
         };
-        auto a_buf = make_buf(Mt * Kt);
-        auto b_buf = make_buf(Kt * Nt);
-        auto c_buf = make_buf(Mt * Nt);
+        auto make_buf_out = [&](uint32_t n_tiles) {
+            distributed::ReplicatedBufferConfig bcfg{.size = cfg.out_bytes * n_tiles};
+            return distributed::MeshBuffer::create(bcfg, dram_out_cfg, mesh_device.get());
+        };
+        auto a_buf = make_buf_in(Mt * Kt);
+        auto b_buf = make_buf_in(Kt * Nt);
+        auto c_buf = make_buf_out(Mt * Nt);
 
         std::mt19937 rng(20260427u);
-        std::uniform_real_distribution<float> dist(-0.5f, 0.5f);
-        std::vector<bfloat16> a_host(static_cast<size_t>(args.M) * args.K);
-        std::vector<bfloat16> b_host(static_cast<size_t>(args.K) * args.N);
-        for (auto& v : a_host) v = bfloat16(dist(rng));
-        for (auto& v : b_host) v = bfloat16(dist(rng));
-        // Tilize: convert from row-major to the device's 32x32 tile-row-major layout.
-        a_host = tilize_nfaces(a_host, args.M, args.K);
-        b_host = tilize_nfaces(b_host, args.K, args.N);
-
         auto& cq = mesh_device->mesh_command_queue();
-        distributed::EnqueueWriteMeshBuffer(cq, a_buf, a_host, /*blocking=*/false);
-        distributed::EnqueueWriteMeshBuffer(cq, b_buf, b_host, /*blocking=*/false);
 
-        Program program = build_bf16_matmul_program(
-            mesh_device.get(), a_buf, b_buf, c_buf, Mt, Kt, Nt, compute_path);
+        if (cfg.is_int8) {
+            std::uniform_int_distribution<int> dist(-127, 127);
+            std::vector<int8_t> a_host(static_cast<size_t>(args.M) * args.K);
+            std::vector<int8_t> b_host(static_cast<size_t>(args.K) * args.N);
+            for (auto& v : a_host) v = static_cast<int8_t>(dist(rng));
+            for (auto& v : b_host) v = static_cast<int8_t>(dist(rng));
+            a_host = tilize_int8_nfaces(a_host, args.M, args.K);
+            b_host = tilize_int8_nfaces(b_host, args.K, args.N);
+            convert_to_sign_mag(a_host);
+            convert_to_sign_mag(b_host);
+            distributed::EnqueueWriteMeshBuffer(cq, a_buf, a_host, /*blocking=*/false);
+            distributed::EnqueueWriteMeshBuffer(cq, b_buf, b_host, /*blocking=*/false);
+        } else {
+            std::uniform_real_distribution<float> dist(-0.5f, 0.5f);
+            std::vector<bfloat16> a_host(static_cast<size_t>(args.M) * args.K);
+            std::vector<bfloat16> b_host(static_cast<size_t>(args.K) * args.N);
+            for (auto& v : a_host) v = bfloat16(dist(rng));
+            for (auto& v : b_host) v = bfloat16(dist(rng));
+            a_host = tilize_nfaces(a_host, args.M, args.K);
+            b_host = tilize_nfaces(b_host, args.K, args.N);
+            distributed::EnqueueWriteMeshBuffer(cq, a_buf, a_host, /*blocking=*/false);
+            distributed::EnqueueWriteMeshBuffer(cq, b_buf, b_host, /*blocking=*/false);
+        }
+
+        Program program = build_matmul_program(
+            cfg, mesh_device.get(), a_buf, b_buf, c_buf, Mt, Kt, Nt, compute_path);
         distributed::MeshWorkload workload;
         distributed::MeshCoordinateRange device_range(mesh_device->shape());
         workload.add_program(device_range, std::move(program));

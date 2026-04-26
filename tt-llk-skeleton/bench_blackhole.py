@@ -246,10 +246,13 @@ def layer_c(sizes: tuple[int, ...]) -> list[BenchResult]:
     """Layer C — exact 36-bit modmul.
 
     Recipe correctness is gated on host (bigint reference). The on-device
-    perf path is ``LAYER_C_GEMMS_PER_ITER × BF16 matmul`` per timed iteration,
-    matching the 5x5 byte-decomposition cost shape. Reported throughput is
-    therefore "exact-modmul/s estimated from the 25-GEMM cascade cost", with
-    a clarifying note in ``device_detail``.
+    perf path is ``LAYER_C_GEMMS_PER_ITER × INT8 matmul`` per timed iteration,
+    matching the 5x5 byte-decomposition cost shape used by the NVIDIA
+    cuBLASLt INT8 path. Reported throughput is therefore "exact-modmul/s
+    estimated from the 25-INT8-GEMM cascade cost", with a clarifying note
+    in ``device_detail``. Backend label is ``tt_llk_int8`` so the record
+    joins NVIDIA's ``cublaslt_int8`` Layer C row in scripts/compare.py
+    (both map to the ``int8`` BACKEND_CLASS).
     """
     q = q36_ntt_friendly_prime()
     # Run the host-side gate **once**; it's a pure recipe check, identical at
@@ -258,7 +261,7 @@ def layer_c(sizes: tuple[int, ...]) -> list[BenchResult]:
 
     out: list[BenchResult] = []
     for s in sizes:
-        d = _dispatch("tt_llk_bf16", "C", s, s, s, q,
+        d = _dispatch("tt_llk_int8", "C", s, s, s, q,
                       LAYER_C_ITERS["warmup"], LAYER_C_ITERS["iters"])
         # The C++ binary already loops 25× per measured iteration, so the
         # median_ms is the wall-clock for one full 25-GEMM cascade.
@@ -270,7 +273,7 @@ def layer_c(sizes: tuple[int, ...]) -> list[BenchResult]:
                 "edge_cases_failed": gate.edge_cases_failed,
                 "note": (
                     "host bigint reference for the 5x5 byte recipe; "
-                    "perf path is 25× BF16 matmul on Blackhole"
+                    "perf path is 25× INT8→INT32-accum matmul on Blackhole"
                 ),
             }
         else:
@@ -285,12 +288,15 @@ def layer_c(sizes: tuple[int, ...]) -> list[BenchResult]:
                 ),
             }
         rec = _make_record(
-            "C", "tt_llk_bf16", s, s, s,
+            "C", "tt_llk_int8", s, s, s,
             LAYER_C_ITERS["iters"], LAYER_C_ITERS["warmup"], d,
             "exact_modmul", "G_modmul/s", correctness=corr,
             extra_detail={
-                "n_bf16_gemms_per_modmul": LAYER_C_GEMMS_PER_ITER,
-                "recipe": "5x5 byte decomposition; reduction on host bigint",
+                "n_int8_gemms_per_modmul": LAYER_C_GEMMS_PER_ITER,
+                "recipe": (
+                    "5x5 byte decomposition; 25× INT8→INT32-accum matmul "
+                    "cost proxy on Blackhole; reduction on host bigint"
+                ),
                 "q36": q,
             },
         )
