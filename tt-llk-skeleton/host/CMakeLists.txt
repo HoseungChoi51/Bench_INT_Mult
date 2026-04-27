@@ -4,41 +4,51 @@ project(bench_blackhole CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Locate TT-Metal. The standard install exports a CMake config under
-# $TT_METAL_HOME/build/install/cmake; we use the env var to find it.
 if(NOT DEFINED ENV{TT_METAL_HOME})
-    message(FATAL_ERROR "TT_METAL_HOME is not set. Source the TT-Metal setup script first.")
+    message(FATAL_ERROR "TT_METAL_HOME is not set. Source the TT-Metal setup script first, "
+                        "or `export TT_METAL_HOME=/path/to/tt-metal`.")
 endif()
 set(TT_METAL_HOME $ENV{TT_METAL_HOME})
 
-# This list is conservative — adjust to match your installed layout. Newer
-# TT-Metal versions ship a single `tt_metal::tt_metal` imported target;
-# older ones ship the headers + libraries split.
-list(APPEND CMAKE_PREFIX_PATH "${TT_METAL_HOME}/build/install" "${TT_METAL_HOME}")
-find_package(tt-metalium QUIET)
-if(NOT tt-metalium_FOUND)
-    # Fallback: include + link by hand. Edit these paths to match your install.
-    include_directories(
-        ${TT_METAL_HOME}/tt_metal
-        ${TT_METAL_HOME}/tt_metal/include
-        ${TT_METAL_HOME}/tt_metal/api
-        ${TT_METAL_HOME}/tt_metal/hw/inc
-    )
-    link_directories(${TT_METAL_HOME}/build/lib)
+# Locate the installed tt-metalium CMake config. The build_Release tree
+# ships lib/cmake/tt-metalium/tt-metalium-config.cmake which exports the
+# TT::Metalium imported target. Note: there is also a stub config at
+# build_Release/tt-metalium-config.cmake that references a missing
+# Metalium.cmake — point find_package directly at the working one.
+foreach(_candidate
+    "${TT_METAL_HOME}/build_Release/lib/cmake/tt-metalium"
+    "${TT_METAL_HOME}/build/lib/cmake/tt-metalium"
+    "${TT_METAL_HOME}/build/install/lib/cmake/tt-metalium")
+    if(EXISTS "${_candidate}/tt-metalium-config.cmake")
+        set(tt-metalium_DIR "${_candidate}")
+        break()
+    endif()
+endforeach()
+if(NOT DEFINED tt-metalium_DIR)
+    message(FATAL_ERROR "Could not locate tt-metalium-config.cmake under "
+                        "${TT_METAL_HOME}/build_Release/lib/cmake/tt-metalium "
+                        "or its peers.")
 endif()
+
+# tt-metalium-config.cmake calls find_dependency() for fmt, nlohmann_json, umd,
+# spdlog, tt-logger. They live alongside it under lib/cmake/<dep>/. Add the
+# parent directory to CMAKE_PREFIX_PATH so each dep's config can be found.
+get_filename_component(_TT_LIB_CMAKE_DIR "${tt-metalium_DIR}/.." ABSOLUTE)
+list(APPEND CMAKE_PREFIX_PATH "${_TT_LIB_CMAKE_DIR}")
+# share/cmake hosts nlohmann_json
+list(APPEND CMAKE_PREFIX_PATH "${TT_METAL_HOME}/build_Release/share/cmake")
+# Also point at the parent build_Release for any package that uses
+# CONFIG-mode and lives at the build root.
+list(APPEND CMAKE_PREFIX_PATH "${TT_METAL_HOME}/build_Release")
+
+find_package(tt-metalium REQUIRED CONFIG)
 
 add_executable(bench_blackhole main.cpp)
+target_link_libraries(bench_blackhole PRIVATE TT::Metalium)
 
-if(tt-metalium_FOUND)
-    target_link_libraries(bench_blackhole PRIVATE tt-metalium::tt-metalium)
-else()
-    target_link_libraries(bench_blackhole PRIVATE tt_metal device)  # adjust per your install
-endif()
-
-# Kernels live next to the host but are dispatched at runtime; we copy them
-# to the build dir so the binary can find them via a known relative path.
-file(GLOB KERNEL_SOURCES "${CMAKE_SOURCE_DIR}/../kernels/*.cpp")
-foreach(K ${KERNEL_SOURCES})
-    get_filename_component(NAME ${K} NAME)
-    configure_file(${K} ${CMAKE_BINARY_DIR}/kernels/${NAME} COPYONLY)
-endforeach()
+# Inject the absolute kernel directory so main.cpp can pass full paths to
+# CreateKernel; this avoids depending on the runtime CWD or
+# TT_METAL_KERNEL_PATH search path.
+get_filename_component(KERNEL_DIR_ABS "${CMAKE_SOURCE_DIR}/../kernels" ABSOLUTE)
+target_compile_definitions(bench_blackhole PRIVATE
+    "KERNEL_DIR=\"${KERNEL_DIR_ABS}\"")

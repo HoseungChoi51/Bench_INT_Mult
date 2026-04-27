@@ -44,6 +44,11 @@ BACKEND_CLASS = {
     "tt_llk_int8": "int8",
     "cublaslt_tf32": "tf32",
     "tt_llk_tf32": "tf32",
+    # Tensix matrix engine for FP32 inputs uses TF32-internal fidelity
+    # (per Tenstorrent's fp32_accuracy doc), the same precision NVIDIA's
+    # Tensor Core uses for FP32. Map it to the same backend class so the
+    # comparison row joins cublaslt_tf32.
+    "tt_llk_fp32_matrix": "tf32",
     "cublaslt_bf16": "bf16",
     "tt_llk_bf16": "bf16",
     "cublaslt_fp32": "fp32",
