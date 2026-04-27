@@ -357,10 +357,113 @@ def layer_c(sizes: tuple[int, ...], primes: tuple[int, ...] = (36, 48)) -> list[
     return out
 
 
+def layer_d_klss_ip(
+    sizes: tuple[int, ...], primes: tuple[int, ...] = (36, 48)
+) -> list[BenchResult]:
+    """Layer D — KLSS-style inner product modulo q (FHE headline metric).
+
+    Same on-device dispatch as :func:`layer_c` (n²-INT8-GEMM cascade per
+    output element, host bigint reduction for correctness), but reported
+    as **useful MACs per second** instead of modmuls per second so it
+    contrasts directly with Layer B's raw GEMM TOPS:
+
+      Layer B → "raw int8 matrix-engine throughput" (TOPS)
+      Layer D → "useful int8 KLSS-IP throughput inside an exact modmul" (G_MAC/s)
+
+    The ratio Layer D / Layer B is the "fraction of raw matrix throughput
+    that survives the exact modular reduction" — the headline FHE
+    cost-of-correctness number. For the n_chunks² recipe it should
+    asymptote at 1/n_chunks² (1/25 for q36, 1/36 for q48).
+    """
+    out: list[BenchResult] = []
+    for prime_bits in primes:
+        if prime_bits not in LAYER_C_PRIMES:
+            raise ValueError(f"unknown Layer D prime size {prime_bits}")
+        q, n_chunks = LAYER_C_PRIMES[prime_bits]
+        n_gemms = n_chunks * n_chunks
+        op_kind = f"klss_ip_modmul_q{prime_bits}"
+
+        gate = correctness_gate(
+            lambda a, b, q=q, nc=n_chunks: _qn_int8_modmul_host(a, b, q, nc), q,
+        )
+
+        for s in sizes:
+            d = _dispatch("tt_llk_int8", "C", s, s, s, q,
+                          LAYER_C_ITERS["warmup"], LAYER_C_ITERS["iters"],
+                          n_gemms=n_gemms)
+            corr_note = (
+                f"host bigint reference for the {n_chunks}x{n_chunks} byte "
+                f"recipe; perf path is {n_gemms}× INT8→INT32-accum matmul "
+                f"on Blackhole (q{prime_bits} KLSS-IP)"
+            )
+            corr = (
+                {
+                    "gate": "passed",
+                    "edge_cases_passed": gate.edge_cases_passed,
+                    "edge_cases_failed": gate.edge_cases_failed,
+                    "note": corr_note,
+                }
+                if gate.gate == "passed" and d.get("error") is None
+                else {
+                    "gate": "skipped" if gate.gate == "passed" else "failed",
+                    "note": "device dispatch error"
+                            if d.get("error") else "host gate failed",
+                }
+            )
+
+            # Build the record via _make_record so we get power/joules
+            # plumbing for free, then patch layer/op-kind/throughput-unit
+            # for the MAC-based view.
+            rec = _make_record(
+                "D", "tt_llk_int8", s, s, s,
+                LAYER_C_ITERS["iters"], LAYER_C_ITERS["warmup"], d,
+                "gemm_mac",  # placeholder; we relabel below
+                "G_MAC/s", correctness=corr,
+                extra_detail={
+                    "n_int8_gemms_per_modmul": n_gemms,
+                    "n_chunks": n_chunks,
+                    "prime_bits": prime_bits,
+                    "recipe": (
+                        f"{n_chunks}x{n_chunks} byte decomposition; "
+                        f"{n_gemms}× INT8→INT32-accum matmul cost proxy on "
+                        f"Blackhole; reduction on host bigint; reported as MACs"
+                    ),
+                    "q": q,
+                },
+            )
+            # MAC count: 2·M·K·N per output (multiply + add). The matmul
+            # under the modular reduction is doing this useful FHE work.
+            useful_macs = 2 * s * s * s
+            median = d.get("median_ms")
+            throughput = (
+                useful_macs / (float(median) * 1e-3) / 1e9
+                if median and median > 0 else None
+            )
+            joules_per_mac = (
+                rec.power_w_avg * float(median) * 1e-3 / float(useful_macs)
+                if rec.power_w_avg is not None and median and useful_macs > 0
+                else None
+            )
+            rec_dict = asdict(rec)
+            rec_dict.update({
+                "useful_op_kind": op_kind,
+                "useful_ops": useful_macs if median is not None else None,
+                "throughput": throughput,
+                "throughput_unit": "G_MAC/s",
+                "joules_per_useful_op": joules_per_mac,
+            })
+            if d.get("error") or corr["gate"] == "failed":
+                for k in ("throughput", "median_ms", "p10_ms", "p90_ms",
+                          "useful_ops", "joules_per_useful_op"):
+                    rec_dict[k] = None
+            out.append(BenchResult(**rec_dict))
+    return out
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="TT Blackhole bench wrapper, BENCHMARK.md §4 v1.")
     p.add_argument("--out", required=True, type=Path)
-    p.add_argument("--layers", default="A,B,C")
+    p.add_argument("--layers", default="A,B,C,D")
     p.add_argument("--sizes", default=None)
     p.add_argument("--backends", default=",".join(DEFAULT_BACKENDS))
     p.add_argument("--quick", action="store_true")
@@ -402,6 +505,10 @@ def main(argv: list[str] | None = None) -> int:
         prime_label = ",".join(f"q{pb}" for pb in primes)
         print(f"Layer C ({prime_label} exact modmul, n²-GEMM cost proxy)…")
         all_results.extend(layer_c(sizes, primes=primes))
+    if "D" in layers:
+        prime_label = ",".join(f"q{pb}" for pb in primes)
+        print(f"Layer D ({prime_label} KLSS-IP, useful MAC view)…")
+        all_results.extend(layer_d_klss_ip(sizes, primes=primes))
 
     write_results(all_results, args.out)
     print(f"\nwrote {len(all_results)} record(s) to {args.out}")

@@ -52,8 +52,9 @@ BACKEND_CLASS = {
     "cublaslt_bf16": "bf16",
     "tt_llk_bf16": "bf16",
     "cublaslt_fp32": "fp32",
-    "tt_llk_fp32_matrix": "fp32",   # TT-LLK matrix-engine FP32 path
-    "tt_llk_sfpu_fp32": "fp32_sfpu",  # SFPU vector FP32; distinct from matrix
+    # SFPU vector FP32 path: joins cuBLAS fp32 since both deliver true
+    # IEEE-754 FP32 (the matrix path above is TF32-internal).
+    "tt_llk_sfpu_fp32": "fp32",
     "cublaslt_fp64": "fp64",
     "cpu_int128": "cpu",
 }
@@ -420,7 +421,7 @@ def render_summary(records: list[dict[str, Any]]) -> str:
     lines.append(render_layer(records, "B") or "_no Layer B records_\n")
     lines.append("## Layer C — exact modular product (q36, q48)")
     lines.append(render_layer(records, "C") or "_no Layer C records_\n")
-    lines.append("## Layer D — KLSS-like inner product")
+    lines.append("## Layer D — KLSS-style inner product (useful MAC view)")
     lines.append(render_layer(records, "D") or "_no Layer D records_\n")
 
     lines.append("## How to update")
