@@ -65,11 +65,9 @@ struct Args {
     int M = 256, K = 256, N = 256;
     int warmup = 5, iters = 30;
     uint64_t q36 = 0xFFFF00001ULL;  // matches scripts/_bench_common.py::q36_ntt_friendly_prime
+    int n_gemms = 25;               // Layer C dispatches per measured iter
+                                    // (5x5 = 25 for q36, 6x6 = 36 for q48)
 };
-
-// Number of GEMM dispatches per measured iteration of Layer C — matches the
-// 5x5 byte-decomposition recipe used by the NVIDIA path.
-constexpr int kLayerCGemmsPerIter = 25;
 
 // 32x32 tile.
 constexpr uint32_t kTile = TILE_HEIGHT;
@@ -139,6 +137,7 @@ Args parse_args(int argc, char** argv) {
         if (take_str("--warmup", tmp)) { a.warmup = std::stoi(tmp); continue; }
         if (take_str("--iters", tmp)) { a.iters = std::stoi(tmp); continue; }
         if (take_str("--q36", tmp)) { a.q36 = std::stoull(tmp); continue; }
+        if (take_str("--n-gemms", tmp)) { a.n_gemms = std::stoi(tmp); continue; }
     }
     return a;
 }
@@ -425,10 +424,10 @@ int main(int argc, char** argv) {
         }
         distributed::Finish(cq);
 
-        // Timed loop. Layer C dispatches the workload kLayerCGemmsPerIter
-        // times per sample to model the 25-GEMM byte-decomposition recipe;
-        // Layers A/B dispatch once.
-        const int dispatches_per_iter = (args.layer == "C") ? kLayerCGemmsPerIter : 1;
+        // Timed loop. Layer C dispatches the workload args.n_gemms times per
+        // sample to model the byte-decomposition recipe (25 for q36, 36 for
+        // q48); Layers A/B dispatch once.
+        const int dispatches_per_iter = (args.layer == "C") ? args.n_gemms : 1;
         std::vector<double> times_ms;
         times_ms.reserve(args.iters);
         for (int it = 0; it < args.iters; ++it) {

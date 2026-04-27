@@ -39,9 +39,9 @@ SCHEMA_VERSION = "2"
 Layer = Literal["A", "B", "C", "D"]
 UsefulOpKind = Literal[
     "gemm_mac",
-    "exact_modmul",
-    "exact_modmul_q36",
-    "exact_modmul_q48",
+    "exact_modmul",       # legacy alias; v1 records use this for q36
+    "exact_modmul_q36",   # 36-bit prime → 25 INT8 GEMMs
+    "exact_modmul_q48",   # 48-bit prime → 36 INT8 GEMMs (v2 Phase 2)
     "klss_mac",
     "klss_ip_modmul",
     "klss_ip_modmul_q36",
@@ -292,6 +292,20 @@ def q36_ntt_friendly_prime() -> int:
     36 bits wide, primality verified by deterministic Miller-Rabin.
     """
     return 0xFFFF00001
+
+
+def q48_ntt_friendly_prime() -> int:
+    """The largest prime ``q < 2^48`` with ``q ≡ 1 (mod 2^16)``.
+
+    Same NTT-friendliness guarantee as :func:`q36_ntt_friendly_prime`;
+    used by the v2 Layer C extension to measure the cost of a wider
+    operand. 48-bit operands decompose into 6 bytes, so a single modmul
+    becomes 6×6 = 36 INT8 GEMMs (vs 25 for q36 — a 1.44× cost factor).
+
+    Value: ``0xFFFFFFFA0001 = 281_474_976_317_441 = 4_294_967_290 · 2^16 + 1``,
+    48 bits wide, primality verified by deterministic Miller-Rabin.
+    """
+    return 0xFFFFFFFA0001
 
 
 # --- Device price registry -------------------------------------------------

@@ -78,6 +78,19 @@ def backend_class(backend: str) -> str:
     return BACKEND_CLASS.get(backend, backend)
 
 
+# Legacy useful_op_kind values from the v1 schema. Pre-Phase-2 records used
+# "exact_modmul" without a prime suffix; post-Phase-2 records use
+# "exact_modmul_q36" / "exact_modmul_q48". Treat the legacy name as q36 so
+# committed NVIDIA q36 JSONL records still join Blackhole q36 records.
+USEFUL_OP_KIND_ALIASES = {
+    "exact_modmul": "exact_modmul_q36",
+}
+
+
+def normalize_op_kind(kind: str) -> str:
+    return USEFUL_OP_KIND_ALIASES.get(kind, kind)
+
+
 def _fmt_thr(r: dict[str, Any]) -> str:
     if r.get("throughput") is None:
         return "—"
@@ -128,7 +141,11 @@ def render_layer(records: list[dict[str, Any]], layer: str) -> str:
     devices = sorted({r["device"] for r in layer_records})
     rows: dict[tuple[str, str, str], dict[str, dict[str, Any]]] = defaultdict(dict)
     for r in layer_records:
-        key = (r["useful_op_kind"], shape_key(r["shape"]), backend_class(r["backend"]))
+        key = (
+            normalize_op_kind(r["useful_op_kind"]),
+            shape_key(r["shape"]),
+            backend_class(r["backend"]),
+        )
         rows[key][r["device"]] = r
 
     out: list[str] = []

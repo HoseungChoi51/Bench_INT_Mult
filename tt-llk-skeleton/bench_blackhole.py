@@ -40,6 +40,7 @@ from scripts._bench_common import (  # noqa: E402
     git_sha,
     now_iso,
     q36_ntt_friendly_prime,
+    q48_ntt_friendly_prime,
     write_results,
 )
 
@@ -59,22 +60,28 @@ LAYER_B_ITERS = {"warmup": 5, "iters": 50}
 LAYER_C_ITERS = {"warmup": 3, "iters": 20}
 LAYER_A_ITERS = {"warmup": 5, "iters": 30}
 LAYER_A_PROBE_SIZE = 1024
-# Layer C dispatches 25 GEMMs per timed iteration (the byte-decomposition
-# recipe). The C++ binary loops internally; this constant is mirrored here so
-# `useful_ops` is computed against the same recipe shape.
-LAYER_C_GEMMS_PER_ITER = 25
+# Layer C primes and their byte-chunk decomposition counts. Each entry maps
+# a prime size in bits to (prime, n_chunks_per_operand). One Layer C "modmul"
+# dispatches n_chunks**2 INT8 GEMMs per timed iteration. The C++ binary loops
+# internally based on the --n-gemms arg; these constants drive both that arg
+# and the host bigint reference inside `_qn_int8_modmul_host`.
+LAYER_C_PRIMES = {
+    36: (q36_ntt_friendly_prime(), 5),  # 5x5 = 25 dispatches per modmul
+    48: (q48_ntt_friendly_prime(), 6),  # 6x6 = 36 dispatches per modmul
+}
 
 BIN_PATH = Path(__file__).resolve().parent / "build" / "bench_blackhole"
 
 
-def _q36_int8_modmul_host(a_list: list[int], b_list: list[int], q: int) -> list[int]:
-    """Host bigint reference for the 25-byte-chunk modmul recipe.
+def _qn_int8_modmul_host(
+    a_list: list[int], b_list: list[int], q: int, n_chunks: int
+) -> list[int]:
+    """Host bigint reference for the n_chunks×n_chunks byte-chunk modmul recipe.
 
     The same algebra the on-device path *would* implement; we use this to
-    drive the Layer C correctness gate while the BF16 perf path supplies
-    the wall-clock cost. Bit-exact by construction (Python ``int``).
+    drive the Layer C correctness gate while the INT8 perf path supplies the
+    wall-clock cost. Bit-exact by construction (Python ``int``).
     """
-    n_chunks = 5
     out: list[int] = []
     for a, b in zip(a_list, b_list, strict=True):
         a_chunks = [(a >> (8 * i)) & 0xFF for i in range(n_chunks)]
@@ -88,9 +95,13 @@ def _q36_int8_modmul_host(a_list: list[int], b_list: list[int], q: int) -> list[
 
 
 def _dispatch(
-    backend: str, layer: str, m: int, k: int, n: int, q36: int, warmup: int, iters: int
+    backend: str, layer: str, m: int, k: int, n: int, q36: int, warmup: int, iters: int,
+    n_gemms: int = 25,
 ) -> dict[str, object]:
     """Run the C++ binary once and parse its CSV line.
+
+    ``n_gemms`` tunes Layer C's per-iteration dispatch count to match the
+    byte-chunk recipe: 25 for q36 (5×5), 36 for q48 (6×6).
 
     Returns a dict with keys: median_ms, p10_ms, p90_ms, arch, n_cores, error.
     """
@@ -107,6 +118,7 @@ def _dispatch(
         "--M", str(m), "--K", str(k), "--N", str(n),
         "--warmup", str(warmup), "--iters", str(iters),
         "--q36", str(q36),
+        "--n-gemms", str(n_gemms),
     ]
     # The C++ binary needs TT_METAL_HOME set so JIT can find runtime headers.
     env = os.environ.copy()
@@ -177,9 +189,9 @@ def _make_record(
         if useful_op_kind == "gemm_mac":
             ops = 2.0 * m * k * n
             throughput = ops / (float(median) * 1e-3) / 1e12
-        elif useful_op_kind == "exact_modmul":
+        elif useful_op_kind.startswith("exact_modmul"):
             # One "exact modmul" per output element; the binary's median
-            # already includes the full 25-GEMM cascade.
+            # already includes the full n²-GEMM cascade.
             useful_ops = m * n
             throughput = useful_ops / (float(median) * 1e-3) / 1e9
 
@@ -248,72 +260,80 @@ def layer_b(sizes: tuple[int, ...], backends: tuple[str, ...]) -> list[BenchResu
     return out
 
 
-def layer_c(sizes: tuple[int, ...]) -> list[BenchResult]:
-    """Layer C — exact 36-bit modmul.
+def layer_c(sizes: tuple[int, ...], primes: tuple[int, ...] = (36, 48)) -> list[BenchResult]:
+    """Layer C — exact modular product across one or more prime sizes.
 
     Recipe correctness is gated on host (bigint reference). The on-device
-    perf path is ``LAYER_C_GEMMS_PER_ITER × INT8 matmul`` per timed iteration,
-    matching the 5x5 byte-decomposition cost shape used by the NVIDIA
-    cuBLASLt INT8 path. Reported throughput is therefore "exact-modmul/s
-    estimated from the 25-INT8-GEMM cascade cost", with a clarifying note
-    in ``device_detail``. Backend label is ``tt_llk_int8`` so the record
-    joins NVIDIA's ``cublaslt_int8`` Layer C row in scripts/compare.py
-    (both map to the ``int8`` BACKEND_CLASS).
+    perf path is ``n_chunks**2 × INT8 matmul`` per timed iteration, matching
+    the byte-decomposition cost shape used by the NVIDIA cuBLASLt INT8
+    path. Per-prime ``useful_op_kind`` is ``exact_modmul_q36`` /
+    ``exact_modmul_q48`` so compare.py renders one row per prime size.
     """
-    q = q36_ntt_friendly_prime()
-    # Run the host-side gate **once**; it's a pure recipe check, identical at
-    # every shape.
-    gate = correctness_gate(lambda a, b: _q36_int8_modmul_host(a, b, q), q)
-
     out: list[BenchResult] = []
-    for s in sizes:
-        d = _dispatch("tt_llk_int8", "C", s, s, s, q,
-                      LAYER_C_ITERS["warmup"], LAYER_C_ITERS["iters"])
-        # The C++ binary already loops 25× per measured iteration, so the
-        # median_ms is the wall-clock for one full 25-GEMM cascade.
-        if gate.gate == "passed" and d.get("error") is None:
-            corr = {
-                "gate": "passed",
-                "edge_cases": gate.edge_cases,
-                "edge_cases_passed": gate.edge_cases_passed,
-                "edge_cases_failed": gate.edge_cases_failed,
-                "note": (
-                    "host bigint reference for the 5x5 byte recipe; "
-                    "perf path is 25× INT8→INT32-accum matmul on Blackhole"
-                ),
-            }
-        else:
-            corr = {
-                "gate": "skipped" if gate.gate == "passed" else "failed",
-                "edge_cases_passed": gate.edge_cases_passed,
-                "edge_cases_failed": gate.edge_cases_failed,
-                "note": (
-                    "device dispatch error" if d.get("error") else
-                    "host gate failed (would not happen with the bigint "
-                    "reference; report a bug)"
-                ),
-            }
-        rec = _make_record(
-            "C", "tt_llk_int8", s, s, s,
-            LAYER_C_ITERS["iters"], LAYER_C_ITERS["warmup"], d,
-            "exact_modmul", "G_modmul/s", correctness=corr,
-            extra_detail={
-                "n_int8_gemms_per_modmul": LAYER_C_GEMMS_PER_ITER,
-                "recipe": (
-                    "5x5 byte decomposition; 25× INT8→INT32-accum matmul "
-                    "cost proxy on Blackhole; reduction on host bigint"
-                ),
-                "q36": q,
-            },
+    for prime_bits in primes:
+        if prime_bits not in LAYER_C_PRIMES:
+            raise ValueError(f"unknown Layer C prime size {prime_bits}; "
+                             f"add it to LAYER_C_PRIMES")
+        q, n_chunks = LAYER_C_PRIMES[prime_bits]
+        n_gemms = n_chunks * n_chunks
+        op_kind = f"exact_modmul_q{prime_bits}"
+
+        # Run the host-side gate once per prime; pure recipe check.
+        gate = correctness_gate(
+            lambda a, b, q=q, nc=n_chunks: _qn_int8_modmul_host(a, b, q, nc), q,
         )
-        # If anything went wrong with the device dispatch, force perf fields
-        # to null so a wrong number can never ship.
-        if d.get("error") or corr["gate"] == "failed":
-            rec_dict = asdict(rec)
-            for k in ("throughput", "median_ms", "p10_ms", "p90_ms", "useful_ops"):
-                rec_dict[k] = None
-            rec = BenchResult(**rec_dict)
-        out.append(rec)
+
+        for s in sizes:
+            d = _dispatch("tt_llk_int8", "C", s, s, s, q,
+                          LAYER_C_ITERS["warmup"], LAYER_C_ITERS["iters"],
+                          n_gemms=n_gemms)
+            if gate.gate == "passed" and d.get("error") is None:
+                corr = {
+                    "gate": "passed",
+                    "edge_cases": gate.edge_cases,
+                    "edge_cases_passed": gate.edge_cases_passed,
+                    "edge_cases_failed": gate.edge_cases_failed,
+                    "note": (
+                        f"host bigint reference for the {n_chunks}x{n_chunks} "
+                        f"byte recipe; perf path is {n_gemms}× INT8→INT32-accum "
+                        f"matmul on Blackhole (q{prime_bits})"
+                    ),
+                }
+            else:
+                corr = {
+                    "gate": "skipped" if gate.gate == "passed" else "failed",
+                    "edge_cases_passed": gate.edge_cases_passed,
+                    "edge_cases_failed": gate.edge_cases_failed,
+                    "note": (
+                        "device dispatch error" if d.get("error") else
+                        "host gate failed (would not happen with the bigint "
+                        "reference; report a bug)"
+                    ),
+                }
+            rec = _make_record(
+                "C", "tt_llk_int8", s, s, s,
+                LAYER_C_ITERS["iters"], LAYER_C_ITERS["warmup"], d,
+                op_kind, "G_modmul/s", correctness=corr,
+                extra_detail={
+                    "n_int8_gemms_per_modmul": n_gemms,
+                    "n_chunks": n_chunks,
+                    "prime_bits": prime_bits,
+                    "recipe": (
+                        f"{n_chunks}x{n_chunks} byte decomposition; "
+                        f"{n_gemms}× INT8→INT32-accum matmul cost proxy on "
+                        f"Blackhole; reduction on host bigint"
+                    ),
+                    "q": q,
+                },
+            )
+            # If anything went wrong with the device dispatch, force perf
+            # fields to null so a wrong number can never ship.
+            if d.get("error") or corr["gate"] == "failed":
+                rec_dict = asdict(rec)
+                for k in ("throughput", "median_ms", "p10_ms", "p90_ms", "useful_ops"):
+                    rec_dict[k] = None
+                rec = BenchResult(**rec_dict)
+            out.append(rec)
     return out
 
 
@@ -326,6 +346,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--quick", action="store_true")
     p.add_argument("--profile", action="store_true",
                    help="Enable TT-Metal device profiler dump (slow).")
+    p.add_argument("--primes", default="36,48",
+                   help="Comma-separated Layer C prime sizes in bits "
+                        "(default: 36,48). Each entry must be a key in "
+                        "LAYER_C_PRIMES.")
     args = p.parse_args(argv)
 
     layers = tuple(args.layers.split(","))
@@ -334,6 +358,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         sizes = QUICK_SIZES if args.quick else DEFAULT_SIZES
     backends = tuple(args.backends.split(","))
+    primes = tuple(int(p) for p in args.primes.split(","))
 
     bin_status = "present" if BIN_PATH.is_file() else "missing — run `make all`"
     print(f"binary  : {BIN_PATH}  ({bin_status})")
@@ -354,8 +379,9 @@ def main(argv: list[str] | None = None) -> int:
         print("Layer B (raw GEMM)…")
         all_results.extend(layer_b(sizes, backends))
     if "C" in layers:
-        print("Layer C (q36 exact modmul, 25-GEMM cost proxy)…")
-        all_results.extend(layer_c(sizes))
+        prime_label = ",".join(f"q{pb}" for pb in primes)
+        print(f"Layer C ({prime_label} exact modmul, n²-GEMM cost proxy)…")
+        all_results.extend(layer_c(sizes, primes=primes))
 
     write_results(all_results, args.out)
     print(f"\nwrote {len(all_results)} record(s) to {args.out}")
