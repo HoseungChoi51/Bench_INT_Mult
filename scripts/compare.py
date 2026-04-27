@@ -57,6 +57,24 @@ BACKEND_CLASS = {
     "tt_llk_sfpu_fp32": "fp32",
     "cublaslt_fp64": "fp64",
     "cpu_int128": "cpu",
+    # Phase 7 — upstream tt-metal GEMM_FLOPS reproduction (high-precision
+    # candidates only; BF8/BF4 are sanity-only). Each row gets its own
+    # backend_class so the tuned numbers don't collide with our reference
+    # Layer B rows (`tt_llk_bf16`, `tt_llk_fp32_matrix`, etc.) — readers
+    # can see the gap between reference and tuned at a glance.
+    "tt_matmul_2d_bf16_hifi4":          "bf16_tuned_hifi4",
+    "tt_matmul_2d_bf16_hifi4_traced":   "bf16_tuned_hifi4",
+    "tt_matmul_2d_bf16_hifi2":          "bf16_tuned_hifi2",
+    "tt_matmul_2d_bf16_hifi2_traced":   "bf16_tuned_hifi2",
+    # Tuned FP32-matrix path joins NVIDIA cublaslt_fp32 (CUDA core, true
+    # IEEE FP32) since both are end-user "FP32" surfaces — but keep in
+    # mind TT's matrix engine internally truncates FP32 inputs to TF32.
+    "tt_matmul_2d_fp32_hifi4":          "fp32_tuned",
+    "tt_matmul_2d_fp32_hifi4_traced":   "fp32_tuned",
+    "tt_matmul_2d_bf8_hifi2":           "bf8_sanity",
+    "tt_matmul_2d_bf8_hifi2_traced":    "bf8_sanity",
+    "tt_matmul_2d_bf4_lofi":            "bf4_sanity",
+    "tt_matmul_2d_bf4_lofi_traced":     "bf4_sanity",
 }
 
 
