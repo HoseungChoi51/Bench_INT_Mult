@@ -54,6 +54,7 @@ DEVICE_BACKEND_COLOR: dict[tuple[str, str], str] = {
     ("Blackhole", "bf16"): PALETTE["reddish_purple"],
     ("Blackhole", "tf32"): PALETTE["yellow"],
     ("Blackhole", "fp32"): PALETTE["yellow"],
+    ("Blackhole", "fp32_sfpu"): PALETTE["black"],
     ("CPU", "cpu"): PALETTE["gray"],
 }
 
@@ -71,7 +72,8 @@ BACKEND_CLASS_MAP = {
     "cublaslt_bf16": "bf16",
     "tt_llk_bf16": "bf16",
     "cublaslt_fp32": "fp32",
-    "tt_llk_sfpu_fp32": "fp32",
+    "tt_llk_fp32_matrix": "fp32",
+    "tt_llk_sfpu_fp32": "fp32_sfpu",
     "cublaslt_fp64": "fp64",
     "cpu_int128": "cpu",
 }
@@ -99,6 +101,24 @@ def _color(device: str, bc: str) -> str:
 
 def _label(device: str, bc: str) -> str:
     return f"{device} {bc}"
+
+
+def is_q36_modmul(op_kind: str) -> bool:
+    """Match the headline 36-bit modmul op kind across schema v1 and v2.
+
+    v1 records use bare ``"exact_modmul"`` (implicitly q36 — that's all
+    Layer C-minimal supported). v2 splits into ``"exact_modmul_q36"``
+    and ``"exact_modmul_q48"``; the q36 variant is the comparable one.
+    """
+    return op_kind in ("exact_modmul", "exact_modmul_q36")
+
+
+def is_q48_modmul(op_kind: str) -> bool:
+    return op_kind == "exact_modmul_q48"
+
+
+def is_klss_ip(op_kind: str) -> bool:
+    return op_kind.startswith("klss_ip_modmul") or op_kind == "klss_mac"
 
 
 # --- Plots ------------------------------------------------------------------
@@ -146,7 +166,7 @@ def plot_layer_c_modmul(records: list[dict[str, Any]], out_path: Path) -> None:
         r for r in records
         if r["layer"] == "C"
         and r.get("throughput") is not None
-        and r["useful_op_kind"] == "exact_modmul"
+        and is_q36_modmul(r["useful_op_kind"])
         and r["device"] != "CPU"  # CPU is on a different shape (n×1×1); separate plot if wanted
     ]
     if not layer_c:
@@ -198,7 +218,7 @@ def plot_layer_c_per_dollar(records: list[dict[str, Any]], out_path: Path) -> No
         r for r in records
         if r["layer"] == "C"
         and r.get("throughput") is not None
-        and r["useful_op_kind"] == "exact_modmul"
+        and is_q36_modmul(r["useful_op_kind"])
         and r["device"] != "CPU"
         and DEVICE_PRICES_USD.get(r["device"], 0) > 0
     ]
@@ -263,7 +283,7 @@ def plot_headline_at_size(
         if r["layer"] == "C"
         and r["shape"]["M"] == shape_n
         and r.get("throughput") is not None
-        and r["useful_op_kind"] == "exact_modmul"
+        and is_q36_modmul(r["useful_op_kind"])
     ]
     if not raw and not modmul:
         return
@@ -331,6 +351,129 @@ def plot_headline_at_size(
     plt.close(fig)
 
 
+def plot_layer_c_q36_vs_q48(records: list[dict[str, Any]], out_path: Path) -> None:
+    """For each device that has both q36 and q48 records, overlay the lines.
+
+    Skipped if no q48 records exist (NVIDIA doesn't have q48 in v1; this
+    plot is meaningful only after both sides have q48 implemented).
+    """
+    layer_c = [
+        r for r in records
+        if r["layer"] == "C"
+        and r.get("throughput") is not None
+        and r["device"] != "CPU"
+        and (is_q36_modmul(r["useful_op_kind"]) or is_q48_modmul(r["useful_op_kind"]))
+    ]
+    if not any(is_q48_modmul(r["useful_op_kind"]) for r in layer_c):
+        return  # only meaningful if at least one device has q48 measured
+
+    by_series: dict[tuple[str, str], list[tuple[int, float]]] = defaultdict(list)
+    for r in layer_c:
+        m = r["shape"]["M"]
+        kind = "q48" if is_q48_modmul(r["useful_op_kind"]) else "q36"
+        # Pick best-throughput backend per (device, kind, M) to match the
+        # headline plot's convention.
+        key = (r["device"], kind)
+        # We aggregate to best later; for now just collect.
+        by_series[key].append((m, r["throughput"]))
+
+    # Collapse to best-per-(device, kind, M).
+    series_best: dict[tuple[str, str], dict[int, float]] = defaultdict(dict)
+    for (device, kind), pts in by_series.items():
+        for m, thr in pts:
+            cur = series_best[(device, kind)].get(m)
+            if cur is None or thr > cur:
+                series_best[(device, kind)][m] = thr
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    for (device, kind), m_to_thr in sorted(series_best.items()):
+        xs = sorted(m_to_thr.keys())
+        ys = [m_to_thr[x] for x in xs]
+        bc = "int8"  # both q36 and q48 use INT8 byte decomposition
+        ax.plot(
+            xs, ys,
+            marker=DEVICE_MARKER.get(device, "o"),
+            color=_color(device, bc),
+            linestyle="-" if kind == "q36" else "--",
+            label=f"{device} {kind}",
+            linewidth=2.0,
+            markersize=7,
+        )
+
+    ax.set_xscale("log", base=2)
+    ax.set_xticks([512, 1024, 2048, 4096, 8192])
+    ax.set_xticklabels(["512", "1024", "2048", "4096", "8192"])
+    ax.set_xlabel("square matmul size N (M=K=N)")
+    ax.set_ylabel("effective exact modmul/s (G_modmul/s)")
+    ax.set_title("Layer C — q36 vs q48 modular product (best backend per device)")
+    ax.legend(loc="best", framealpha=0.9)
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+
+
+def plot_layer_d_klss_ip(records: list[dict[str, Any]], out_path: Path) -> None:
+    """Layer D KLSS-like inner product. The headline FHE-throughput plot
+    once both sides have it implemented; for now usually TT-only."""
+    layer_d = [
+        r for r in records
+        if r["layer"] == "D"
+        and r.get("throughput") is not None
+        and is_klss_ip(r["useful_op_kind"])
+        and r["device"] != "CPU"
+    ]
+    if not layer_d:
+        return
+
+    series_best: dict[tuple[str, str], dict[int, float]] = defaultdict(dict)
+    for r in layer_d:
+        m = r["shape"]["M"]
+        # Extract q36/q48 from op_kind suffix; default 'q?' if absent.
+        op = r["useful_op_kind"]
+        if op.endswith("_q36"):
+            kind = "q36"
+        elif op.endswith("_q48"):
+            kind = "q48"
+        else:
+            kind = "?"
+        cur = series_best[(r["device"], kind)].get(m)
+        if cur is None or r["throughput"] > cur:
+            series_best[(r["device"], kind)][m] = r["throughput"]
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    for (device, kind), m_to_thr in sorted(series_best.items()):
+        xs = sorted(m_to_thr.keys())
+        ys = [m_to_thr[x] for x in xs]
+        ax.plot(
+            xs, ys,
+            marker=DEVICE_MARKER.get(device, "o"),
+            color=_color(device, "int8"),
+            linestyle="-" if kind == "q36" else "--",
+            label=f"{device} {kind}",
+            linewidth=2.2,
+            markersize=8,
+        )
+
+    nvidia_present = any(r["device"] == "RTX5090" for r in layer_d)
+    if not nvidia_present:
+        ax.text(
+            0.5, 0.02,
+            "NVIDIA Layer D not yet implemented — TT side only",
+            transform=ax.transAxes, ha="center", va="bottom",
+            fontsize=9, style="italic", color="#555",
+            bbox={"facecolor": "white", "edgecolor": "#aaa", "boxstyle": "round,pad=0.4"},
+        )
+
+    ax.set_xscale("log", base=2)
+    ax.set_xticks([512, 1024, 2048, 4096, 8192])
+    ax.set_xticklabels(["512", "1024", "2048", "4096", "8192"])
+    ax.set_xlabel("square matmul size N (M=K=N)")
+    ax.set_ylabel("effective KLSS-IP useful MAC/s (G_MAC/s)")
+    ax.set_title("Layer D — KLSS-like inner product (the FHE workload metric)")
+    ax.legend(loc="best", framealpha=0.9)
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+
+
 # --- Driver ------------------------------------------------------------------
 
 
@@ -351,11 +494,14 @@ def main(argv: list[str] | None = None) -> int:
     plot_layer_b_throughput(records, args.out_dir / "layer_b_throughput.png")
     plot_layer_c_modmul(records, args.out_dir / "layer_c_modmul.png")
     plot_layer_c_per_dollar(records, args.out_dir / "layer_c_modmul_per_dollar.png")
+    plot_layer_c_q36_vs_q48(records, args.out_dir / "layer_c_q36_vs_q48.png")
+    plot_layer_d_klss_ip(records, args.out_dir / "layer_d_klss_ip.png")
     plot_headline_at_size(
         records, args.headline_shape, args.out_dir / f"headline_{args.headline_shape}.png"
     )
 
-    print(f"wrote 4 PNG(s) to {args.out_dir}")
+    n_pngs = len(list(args.out_dir.glob("*.png")))
+    print(f"wrote {n_pngs} PNG(s) to {args.out_dir}")
     return 0
 
 

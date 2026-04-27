@@ -47,7 +47,8 @@ BACKEND_CLASS = {
     "cublaslt_bf16": "bf16",
     "tt_llk_bf16": "bf16",
     "cublaslt_fp32": "fp32",
-    "tt_llk_sfpu_fp32": "fp32",
+    "tt_llk_fp32_matrix": "fp32",   # TT-LLK matrix-engine FP32 path
+    "tt_llk_sfpu_fp32": "fp32_sfpu",  # SFPU vector FP32; distinct from matrix
     "cublaslt_fp64": "fp64",
     "cpu_int128": "cpu",
 }
@@ -272,12 +273,18 @@ def _render_plots_section() -> list[str]:
     The expected output directory is the same one this script writes to.
     """
     plots = [
+        ("Layer D — KLSS-like inner product",
+         "layer_d_klss_ip.png",
+         "The actual FHE workload metric (useful MAC/s per second). Where TT KLSS results live."),
         ("Layer C — exact 36-bit modmul throughput",
          "layer_c_modmul.png",
-         "Best backend per device. The headline FHE-relevance plot."),
+         "Best backend per device. q36 only; q48 is in a separate plot."),
         ("Layer C — exact 36-bit modmul per dollar",
          "layer_c_modmul_per_dollar.png",
          "Same data, normalized by device MSRP. Answers the price-ratio question."),
+        ("Layer C — q36 vs q48 modular product",
+         "layer_c_q36_vs_q48.png",
+         "Solid lines = q36, dashed = q48. Shows the cost of going to a 48-bit prime."),
         ("Layer B — raw GEMM throughput",
          "layer_b_throughput.png",
          "Per (device, backend), log-y. Shows the full precision-vs-throughput envelope."),
@@ -311,13 +318,17 @@ def render_summary(records: list[dict[str, Any]]) -> str:
     timestamps = sorted({r.get("timestamp", "") for r in records})
     git_shas = sorted({r.get("git_sha", "") for r in records})
     schema_versions = sorted({r.get("schema_version", "") for r in records})
-    if len(schema_versions) > 1:
-        raise RuntimeError(f"records have mismatched schema_versions: {schema_versions}")
 
     lines: list[str] = []
     lines.append("# Bench summary — RTX 5090 vs TT Blackhole")
     lines.append("")
-    lines.append(f"- **Schema version**: {schema_versions[0]}")
+    lines.append(f"- **Schema versions present**: {', '.join(schema_versions)}")
+    if len(schema_versions) > 1:
+        lines.append(
+            "  _Mixed schemas merged. v2 is a strict superset of v1 "
+            "(adds Layer D, q36/q48 op_kind variants, energy fields); v1 records "
+            "have v2-only fields rendered as `—`._"
+        )
     lines.append(f"- **Devices**: {', '.join(devices)}")
     lines.append(f"- **Records**: {len(records)}")
     lines.append(f"- **Timestamps**: {timestamps[0]} – {timestamps[-1]}")
@@ -344,8 +355,10 @@ def render_summary(records: list[dict[str, Any]]) -> str:
     lines.append(render_layer(records, "A") or "_no Layer A records_\n")
     lines.append("## Layer B — raw GEMM")
     lines.append(render_layer(records, "B") or "_no Layer B records_\n")
-    lines.append("## Layer C — exact 36-bit modular product")
+    lines.append("## Layer C — exact modular product (q36, q48)")
     lines.append(render_layer(records, "C") or "_no Layer C records_\n")
+    lines.append("## Layer D — KLSS-like inner product")
+    lines.append(render_layer(records, "D") or "_no Layer D records_\n")
 
     lines.append("## How to update")
     lines.append("")

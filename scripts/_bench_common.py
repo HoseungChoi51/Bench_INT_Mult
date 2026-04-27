@@ -29,10 +29,24 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"
 
-Layer = Literal["A", "B", "C"]
-UsefulOpKind = Literal["gemm_mac", "exact_modmul", "klss_mac"]
+# Schema history:
+#   v1 (initial)   — A/B/C layers, gemm_mac / exact_modmul / klss_mac op_kinds.
+#   v2 (TT-side)   — adds Layer D (klss_ip_modmul); splits exact_modmul into
+#                    q36 / q48 variants; adds joules/power telemetry. v2 is a
+#                    strict superset of v1, so old records are still valid.
+Layer = Literal["A", "B", "C", "D"]
+UsefulOpKind = Literal[
+    "gemm_mac",
+    "exact_modmul",
+    "exact_modmul_q36",
+    "exact_modmul_q48",
+    "klss_mac",
+    "klss_ip_modmul",
+    "klss_ip_modmul_q36",
+    "klss_ip_modmul_q48",
+]
 GateOutcome = Literal["passed", "skipped", "failed"]
 
 
@@ -77,6 +91,9 @@ class BenchResult:
     host_overhead_ms: float | None
     git_sha: str
     timestamp: str
+    # v2 additions (optional — older v1 records leave these as None):
+    power_w_avg: float | None = None
+    joules_per_useful_op: float | None = None
 
     def to_jsonl_line(self) -> str:
         return json.dumps(asdict(self), separators=(",", ":"))

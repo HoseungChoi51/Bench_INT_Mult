@@ -40,7 +40,6 @@ generated/
 # Benchmark outputs: raw JSONL is gitignored; SUMMARY.md and PNG plots
 # are tracked so the GitHub view of the repo shows the comparison without
 # requiring a re-run.
-bench-results/*
 !bench-results/SUMMARY.md
 !bench-results/.gitkeep
 !bench-results/*.png
