@@ -68,6 +68,7 @@ from scripts._bench_common import (  # noqa: E402
     now_iso,
     q36_ntt_friendly_prime,
     q48_ntt_friendly_prime,
+    read_nvidia_power_w,
     write_results,
 )
 
@@ -212,13 +213,23 @@ def layer_a_capability_probe() -> list[BenchResult]:
                 )
             )
             continue
+        power_pre = read_nvidia_power_w()
         median_ms, p10, p90 = cuda_time(step, **LAYER_A_ITERS)
+        power_post = read_nvidia_power_w()
+        power_w_avg = (
+            (power_pre + power_post) / 2.0
+            if power_pre is not None and power_post is not None else None
+        )
         flops = 2.0 * s * s * s
         tflops = flops / (median_ms * 1e-3) / 1e12
         suspect = False
         ref = BLACKWELL_PROFILE_TOPS.get(backend)
         if ref is not None and (tflops > 5 * ref or tflops < ref / 5):
             suspect = True
+        joules_per_op = (
+            power_w_avg * (median_ms * 1e-3) / float(int(flops))
+            if power_w_avg is not None else None
+        )
         results.append(
             BenchResult(
                 schema_version=SCHEMA_VERSION,
@@ -243,6 +254,8 @@ def layer_a_capability_probe() -> list[BenchResult]:
                 correctness={"gate": "skipped"},  # Layer A doesn't gate
                 host_overhead_ms=None,
                 git_sha=sha, timestamp=ts,
+                power_w_avg=power_w_avg,
+                joules_per_useful_op=joules_per_op,
             )
         )
     return results
@@ -280,9 +293,19 @@ def layer_b_raw_gemm(sizes: tuple[int, ...], backends: tuple[str, ...]) -> list[
                 )
                 torch.cuda.empty_cache()
                 continue
+            power_pre = read_nvidia_power_w()
             median_ms, p10, p90 = cuda_time(step, **LAYER_B_ITERS)
+            power_post = read_nvidia_power_w()
+            power_w_avg = (
+                (power_pre + power_post) / 2.0
+                if power_pre is not None and power_post is not None else None
+            )
             flops = 2.0 * s * s * s
             tflops = flops / (median_ms * 1e-3) / 1e12
+            joules_per_op = (
+                power_w_avg * (median_ms * 1e-3) / float(int(flops))
+                if power_w_avg is not None else None
+            )
             results.append(
                 BenchResult(
                     schema_version=SCHEMA_VERSION,
@@ -303,6 +326,8 @@ def layer_b_raw_gemm(sizes: tuple[int, ...], backends: tuple[str, ...]) -> list[
                     correctness={"gate": "skipped"},
                     host_overhead_ms=None,
                     git_sha=sha, timestamp=ts,
+                    power_w_avg=power_w_avg,
+                    joules_per_useful_op=joules_per_op,
                 )
             )
             del step
@@ -534,9 +559,19 @@ def layer_c_int8_modmul(
                 torch.cuda.empty_cache()
                 continue
 
+            power_pre = read_nvidia_power_w()
             median_ms, p10, p90 = cuda_time(step, **LAYER_C_ITERS)
+            power_post = read_nvidia_power_w()
+            power_w_avg = (
+                (power_pre + power_post) / 2.0
+                if power_pre is not None and power_post is not None else None
+            )
             useful_ops = s * s
             g_modmul_per_sec = useful_ops / (median_ms * 1e-3) / 1e9
+            joules_per_op = (
+                power_w_avg * (median_ms * 1e-3) / float(useful_ops)
+                if power_w_avg is not None else None
+            )
             results.append(BenchResult(
                 schema_version=SCHEMA_VERSION,
                 device="RTX5090",
@@ -569,6 +604,8 @@ def layer_c_int8_modmul(
                 },
                 host_overhead_ms=None,
                 git_sha=sha, timestamp=ts,
+                power_w_avg=power_w_avg,
+                joules_per_useful_op=joules_per_op,
             ))
             del step
             torch.cuda.empty_cache()

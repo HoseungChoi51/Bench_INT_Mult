@@ -132,6 +132,25 @@ def _select_headline_devices(devices: list[str]) -> tuple[str, str] | None:
     return None
 
 
+def _fmt_power(r: dict[str, Any]) -> str:
+    p = r.get("power_w_avg")
+    return f"{p:.1f} W" if p is not None else "—"
+
+
+def _fmt_per_joule(r: dict[str, Any]) -> str:
+    """Throughput per watt (TFLOPS/W or G_modmul/s/W).
+
+    Computed from throughput and power_w_avg directly so the unit on the
+    label matches the throughput unit.
+    """
+    thr = r.get("throughput")
+    p = r.get("power_w_avg")
+    unit = r.get("throughput_unit", "")
+    if thr is None or p is None or p <= 0:
+        return "—"
+    return f"{thr / p:.3f} {unit}/W"
+
+
 def render_layer(records: list[dict[str, Any]], layer: str) -> str:
     """One markdown table per layer, joined on (op_kind, shape, backend_class)."""
     layer_records = [r for r in records if r.get("layer") == layer]
@@ -148,6 +167,11 @@ def render_layer(records: list[dict[str, Any]], layer: str) -> str:
         )
         rows[key][r["device"]] = r
 
+    # Add power columns only when at least one record in the layer carries
+    # power_w_avg. Keeps the v1-style table unchanged when no telemetry was
+    # captured.
+    has_power = any(r.get("power_w_avg") is not None for r in layer_records)
+
     out: list[str] = []
     out.append(f"### Layer {layer}")
     out.append("")
@@ -155,6 +179,9 @@ def render_layer(records: list[dict[str, Any]], layer: str) -> str:
     for d in devices:
         header.append(f"{d} thr")
         header.append(f"{d} /k$")
+        if has_power:
+            header.append(f"{d} W")
+            header.append(f"{d} thr/W")
         header.append(f"{d} gate")
     out.append("| " + " | ".join(header) + " |")
     out.append("|" + "|".join(["---"] * len(header)) + "|")
@@ -166,9 +193,15 @@ def render_layer(records: list[dict[str, Any]], layer: str) -> str:
         for d in devices:
             r = rows[key].get(d)
             if r is None:
-                row += ["—", "—", "—"]
+                row += ["—", "—"]
+                if has_power:
+                    row += ["—", "—"]
+                row += ["—"]
             else:
-                row += [_fmt_thr(r), _fmt_per_dollar(r), r["correctness"].get("gate", "—")]
+                row += [_fmt_thr(r), _fmt_per_dollar(r)]
+                if has_power:
+                    row += [_fmt_power(r), _fmt_per_joule(r)]
+                row += [r["correctness"].get("gate", "—")]
         out.append("| " + " | ".join(row) + " |")
 
     pair = _select_headline_devices(devices)
@@ -340,6 +373,14 @@ def render_summary(records: list[dict[str, Any]]) -> str:
     timestamps = sorted({r.get("timestamp", "") for r in records})
     git_shas = sorted({r.get("git_sha", "") for r in records})
     schema_versions = sorted({r.get("schema_version", "") for r in records})
+    # v1↔v2 mixing is allowed: v2 added optional power_w_avg / joules_per_useful_op
+    # fields with default None, so v1 records load cleanly. Anything beyond
+    # {"1", "2"} signals an unsupported combination.
+    unsupported = set(schema_versions) - {"1", "2"}
+    if unsupported:
+        raise RuntimeError(
+            f"records have unsupported schema_versions: {sorted(unsupported)}"
+        )
 
     lines: list[str] = []
     lines.append("# Bench summary — RTX 5090 vs TT Blackhole")

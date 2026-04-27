@@ -41,6 +41,7 @@ from scripts._bench_common import (  # noqa: E402
     now_iso,
     q36_ntt_friendly_prime,
     q48_ntt_friendly_prime,
+    read_tt_power_w,
     write_results,
 )
 
@@ -124,9 +125,12 @@ def _dispatch(
     env = os.environ.copy()
     env.setdefault("TT_METAL_HOME", str(Path.home() / "TT" / "tt-metal"))
     env.setdefault("ARCH_NAME", "blackhole")
+    # Pre/post snapshot board power around the dispatch (covers warmup + iters).
+    power_pre = read_tt_power_w()
     proc = subprocess.run(
         cmd, capture_output=True, text=True, check=False, timeout=600, env=env
     )
+    power_post = read_tt_power_w()
     if proc.returncode != 0 and not proc.stdout.strip():
         return {
             "median_ms": None, "p10_ms": None, "p90_ms": None,
@@ -157,10 +161,16 @@ def _dispatch(
     except ValueError:
         n_cores = None
     err = ",".join(parts[5:]).strip()
+    # Average pre/post snapshot. None if either reading was unavailable.
+    if power_pre is not None and power_post is not None:
+        power_w_avg: float | None = (power_pre + power_post) / 2.0
+    else:
+        power_w_avg = None
     return {
         "median_ms": median, "p10_ms": p10, "p90_ms": p90,
         "arch": arch, "n_cores": n_cores,
         "error": err if err else None,
+        "power_w_avg": power_w_avg,
     }
 
 
@@ -209,6 +219,14 @@ def _make_record(
     )
     dtype_acc = "int32" if "int8" in backend else "fp32"
 
+    power_w_avg = dispatch.get("power_w_avg")
+    joules_per_useful_op: float | None = None
+    if (power_w_avg is not None and median is not None and median > 0
+            and useful_ops_val and useful_ops_val > 0):
+        joules_per_useful_op = (
+            float(power_w_avg) * float(median) * 1e-3 / float(useful_ops_val)
+        )
+
     return BenchResult(
         schema_version=SCHEMA_VERSION,
         device="Blackhole",
@@ -229,6 +247,8 @@ def _make_record(
         correctness=correctness,
         host_overhead_ms=None,
         git_sha=sha, timestamp=ts,
+        power_w_avg=power_w_avg,
+        joules_per_useful_op=joules_per_useful_op,
     )
 
 
