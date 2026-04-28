@@ -75,14 +75,19 @@ BACKEND_CLASS = {
     "tt_matmul_2d_bf8_hifi2_traced":    "bf8_sanity",
     "tt_matmul_2d_bf4_lofi":            "bf4_sanity",
     "tt_matmul_2d_bf4_lofi_traced":     "bf4_sanity",
-    # Phase 7 (INT8 extension) — block-tiled INT8 matmul (no mcast).
-    # Drops the `llk` prefix to match the rest of the tuned family;
-    # joins NVIDIA cublaslt_int8 in the int8 class so the row sits
-    # alongside the v1 reference `tt_llk_int8` and the cuBLASLt INT8
-    # reference. See doc/04_phase7_tuned_matmul.md §4.7.
-    "tt_matmul_2d_int8_hifi4":          "int8",
-    "tt_matmul_2d_int8_hifi2":          "int8",
-    "tt_matmul_2d_int8_lofi":           "int8",
+    # Phase 7 INT8 family: each kernel-quality tier gets its own
+    # backend_class so the rows render as separate lines in the joined
+    # SUMMARY (same-shape collapse would otherwise pick last-wins).
+    # NVIDIA cublaslt_int8 and the v1 TT reference (`tt_llk_int8`) stay
+    # in the `int8` class — the only one with cross-device coverage.
+    # Block-tiled and mcast tiers are TT-only, so they don't lose
+    # anything by being in their own classes.
+    "tt_matmul_2d_int8_hifi4":          "int8_tuned",
+    "tt_matmul_2d_int8_hifi2":          "int8_tuned",
+    "tt_matmul_2d_int8_lofi":           "int8_tuned",
+    "tt_matmul_2d_int8_mcast_hifi4":    "int8_tuned_mcast",
+    "tt_matmul_2d_int8_mcast_hifi2":    "int8_tuned_mcast",
+    "tt_matmul_2d_int8_mcast_lofi":     "int8_tuned_mcast",
     # Phase 8 — SFPU INT32 fused mul+add. No NVIDIA counterpart in the
     # current dataset (the matrix engine has no INT32 surface, and we
     # have not yet wired a CUDA-core int32 FMA row); the comparison row

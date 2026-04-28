@@ -24,6 +24,8 @@ IP_BUILD_DIR   := build_sfpu_ip
 IP_BIN         := $(IP_BUILD_DIR)/bench_sfpu_int32_inner_product
 INT8_BUILD_DIR := build_int8_tuned
 INT8_BIN       := $(INT8_BUILD_DIR)/bench_int8_tuned
+MCAST_BUILD_DIR := build_int8_tuned_mcast
+MCAST_BIN       := $(MCAST_BUILD_DIR)/bench_int8_tuned_mcast
 
 OUT       ?= ../bench-results/blackhole_$(shell git -C .. rev-parse --short HEAD 2>/dev/null || echo dev)_$(shell date +%Y%m%d).jsonl
 LAYERS    ?= A,B,C
@@ -31,7 +33,8 @@ SIZES     ?= 512,1024,2048,4096,8192
 
 .PHONY: all run profile clean check-env bench_sfpu_int32_fma sfpu_run \
         bench_sfpu_int32_inner_product ip_run \
-        bench_int8_tuned int8_tuned_run
+        bench_int8_tuned int8_tuned_run \
+        bench_int8_tuned_mcast int8_tuned_mcast_run
 
 check-env:
 	@if [ ! -d "$(TT_METAL_HOME)" ]; then \
@@ -81,6 +84,18 @@ int8_tuned_run: bench_int8_tuned
 	uv run --directory .. python scripts/bench_blackhole_int8_tuned.py \
 		--out ../bench-results/blackhole_$(shell git -C .. rev-parse --short HEAD 2>/dev/null || echo dev)_int8_tuned_$(shell date +%Y%m%d).jsonl
 
+# Phase 7 (INT8 mcast extension) — block-tiled INT8 matmul *with* operand multicast.
+bench_int8_tuned_mcast: $(MCAST_BIN)
+
+$(MCAST_BIN): host_int8_tuned_mcast/main.cpp host_int8_tuned_mcast/CMakeLists.txt | check-env
+	@mkdir -p $(MCAST_BUILD_DIR)
+	cmake -S host_int8_tuned_mcast -B $(MCAST_BUILD_DIR) -DCMAKE_BUILD_TYPE=Release
+	cmake --build $(MCAST_BUILD_DIR) --parallel
+
+int8_tuned_mcast_run: bench_int8_tuned_mcast
+	uv run --directory .. python scripts/bench_blackhole_int8_tuned_mcast.py \
+		--out ../bench-results/blackhole_$(shell git -C .. rev-parse --short HEAD 2>/dev/null || echo dev)_int8_tuned_mcast_$(shell date +%Y%m%d).jsonl
+
 run: all
 	python bench_blackhole.py --out $(OUT) --layers $(LAYERS) --sizes $(SIZES)
 
@@ -89,4 +104,4 @@ profile: all
 		--out $(OUT) --layers $(LAYERS) --sizes $(SIZES) --profile
 
 clean:
-	rm -rf $(BUILD_DIR) $(SFPU_BUILD_DIR) $(IP_BUILD_DIR) $(INT8_BUILD_DIR)
+	rm -rf $(BUILD_DIR) $(SFPU_BUILD_DIR) $(IP_BUILD_DIR) $(INT8_BUILD_DIR) $(MCAST_BUILD_DIR)

@@ -11,8 +11,10 @@ utilisation. The reference-vs-tuned gap is **~37×** for BF16/HiFi4 and
 
 For INT8, the equivalent tuned reproduction lifts our v1+v2 reference
 from **7.4 TOPS** to **94 TOPS** (block-tiled, no multicast) at
-5120×5632×5632 — a **~13× speedup**, and within ~1.5× of the BF16/HiFi4
-tuned ceiling. See §4.5.3.
+5120×5632×5632 — a **~13× speedup**. Adding operand multicast on top
+takes that to **228 TOPS** at the same shape — **~31× the v1+v2
+reference** and crossing past NVIDIA cuBLASLt's 215 TOPS plateau.
+See §4.5.3 (block-tiled) and §4.5.4 (mcast).
 
 This document explains how that gap was measured, why it was hidden in
 v1+v2, what the new numbers do (and don't) change about the cross-device
@@ -304,7 +306,59 @@ INT8 — directly comparable to BF16/HiFi2's 6.24 TFLOPS/W from §4.5.4
 because the per-tile work is the same but each "TOP" is half the bit
 width's worth of useful work).
 
-### 4.5.4 Per-watt under load
+### 4.5.4 INT8 tuned matmul *with operand multicast* (closes the §4.7 mcast item)
+
+Following §4.5.3 with the operand-multicast variant — the upstream
+[`matmul_multicore_reuse_mcast`](https://github.com/tenstorrent/tt-metal/tree/main/tt_metal/programming_examples/matmul/matmul_multicore_reuse_mcast)
+example, ported to INT8 with the same DataFormat::Int8 / fp32_dest_acc_en /
+sign-magnitude / grid-filling adaptations. Compute kernel and all 4
+multicast reader variants + the writer reused **unmodified** from
+upstream. The 11×10 grid splits cleanly into the four mcast core regions
+(1 + 9 + 10 + 90 = 110 cores).
+
+| Shape (M×K×N)         | HiFi4 (mcast) | HiFi2 (mcast) | mcast / non-mcast (HiFi2) |
+| --------------------- | ------------- | ------------- | ------------------------- |
+| 1280×2816×2816        | 98.4 TOPS     | 130.1 TOPS    | **3.42×** |
+| 2560×2816×2816        | 109.8 TOPS    | 167.6 TOPS    | 3.06× |
+| 2560×4224×4224        | 126.9 TOPS    | 206.1 TOPS    | 3.17× |
+| 3840×4224×4224        | 121.0 TOPS    | 195.6 TOPS    | 2.50× |
+| 3840×4224×5632        | 121.2 TOPS    | 197.5 TOPS    | 2.35× |
+| 4160×3520×3520 (P150) | 126.2 TOPS    | 202.5 TOPS    | 2.74× |
+| **5120×5632×5632**    | **132.2 TOPS** | **228.5 TOPS** | **2.43×** |
+
+Multicast buys **2.4–3.4×** over the block-tiled-only path, biggest at
+small shapes (the operand-fetch cost dominates the mostly-idle smaller
+shapes more, so saving that cost has bigger impact). Energy per useful
+op tracks too: HiFi2 mcast at the largest shape draws 43.5 W ⇒
+**5.25 TOPS/W**, matching the BF16/HiFi2 tuned 6.24 TFLOPS/W from §4.5.5
+within ~17%.
+
+#### Comparison to NVIDIA cuBLASLt INT8
+
+cuBLASLt's INT8 throughput on RTX 5090 saturates at **215 TOPS** by
+4096³ (137 G_MAC) and stays flat at 8192³. The TT mcast path hits
+**228 TOPS** at 5120×5632×5632 (162 G_MAC) — and is still climbing.
+
+| | NVIDIA RTX 5090 cuBLASLt | TT Blackhole p150a (INT8 mcast HiFi2) |
+| --- | --- | --- |
+| Peak measured throughput | 215 TOPS @ 4096³ | **228 TOPS** @ 5120×5632×5632 |
+| Closest by problem-size match (~137 G_MAC) | 215 TOPS @ 4096³ | 196 TOPS @ 3840×4224×4224 |
+| Per-dollar peak | 108 TOPS/k$ ($1999) | **229 TOPS/k$** ($999) |
+| Plateaued? | yes | no — still climbing at the largest shape we measured |
+
+**Headline:** at silicon-vs-silicon best-throughput, **TT Blackhole
+slightly edges out RTX 5090 on raw INT8 GEMM (1.06×)**. **Per dollar,
+Blackhole is 2.1× ahead.** The §4.6 narrative needs the matching update
+— see below.
+
+This **completely inverts the v2 conclusion**. v2 reported "RTX 5090
+wins INT8 by 28× silicon, 14× per dollar"; the Phase 7 mcast number
+brings that to **0.94× silicon (TT-favoured) and 0.47× per dollar
+(TT-favoured 2.1×)**. The 28× v2 gap was kernel quality, not silicon
+— closing the gap took two well-known patterns (block reuse + operand
+multicast), both copied verbatim from upstream programming examples.
+
+### 4.5.5 Per-watt under load
 
 Steady-state Tensix power held at **39–46 W** through the entire 4-minute
 sweep (`tt-smi -s | TDP`). The card's published TDP cap is 80 W, so the
@@ -355,8 +409,10 @@ What remains unchanged:
   iterates over BF16, BF8, BF4 only. The §4.5.3 INT8 tuned reproduction
   (added 2026-04-29) plugs that gap on the block-tiled side: the v1
   reference's 7.4 TOPS becomes **70.8–93.9 TOPS** at large shapes
-  (5120×5632×5632, HiFi4 / HiFi2). Multicast on INT8 — another expected
-  2–3× — is still open work (see §4.7).
+  (5120×5632×5632, HiFi4 / HiFi2). The §4.5.4 mcast extension takes
+  that to **228 TOPS** at the same shape — past NVIDIA cuBLASLt's
+  215 TOPS plateau and 2.1× ahead per dollar. The 28× gap v2 reported
+  for INT8 was kernel quality, not silicon.
 - Layer C's correctness gate behaviour is unchanged (still passes against
   the host bigint reference).
 - Power and per-dollar columns still apply — the math just moves with the
@@ -373,8 +429,8 @@ silicon does" without qualification is wrong.
 
 | Item | Why deferred |
 | --- | --- |
-| ~~INT8 tuned matmul (`tt_matmul_2d_int8_*`)~~ | **DONE 2026-04-29 — see §4.5.3.** Plateau **94 TOPS** at 5120×5632×5632 (INT8/HiFi2), within a few factors of BF16/HiFi4 (142 TFLOPS) and ~13× the v1 reference's 7.4 TOPS. Block-tiled, **no multicast** — that next 2–3× is the new open item. |
-| INT8 tuned **with operand multicast** | The §4.5.3 INT8 path uses block reuse but not operand multicast. Adding mcast (port the upstream `matmul_multicore_reuse_mcast` example with the same INT8 adaptations) would close the remaining ~3× gap to the BF16 tuned ceiling. ~3–5 hours of work; not blocking. |
+| ~~INT8 tuned matmul (`tt_matmul_2d_int8_*`)~~ | **DONE 2026-04-29 — see §4.5.3.** Plateau **94 TOPS** at 5120×5632×5632 (INT8/HiFi2), within a few factors of BF16/HiFi4 (142 TFLOPS) and ~13× the v1 reference's 7.4 TOPS. Block-tiled, no multicast. |
+| ~~INT8 tuned with operand multicast~~ | **DONE 2026-04-29 — see §4.5.4.** Plateau **228 TOPS** at 5120×5632×5632 (HiFi2 + 2D mcast), 2.43× the non-mcast number, **slightly past NVIDIA cuBLASLt INT8 (215 TOPS at 4096³)** silicon-vs-silicon and **2.1× ahead per dollar**. Closes the v2's reported "28× INT8 silicon disadvantage" — that gap was entirely kernel quality. |
 | FP32 tuned matmul (`tt_matmul_2d_fp32_hifi4`) | Same situation — upstream doesn't iterate FP32. The Phase 7 wrapper has the BACKEND_CLASS slot wired (`fp32_tuned`) but no rows hit it yet. |
 | Custom-shape sweep (rectangular / SRAM-fit boundary) | `tt_metal_extras/test_ttnn_shapes.py` envisioned in the v2 plan was not written — direct parameter sweeping at the upstream test's level requires either patching the test or reproducing its scaffolding locally. Not blocking. |
 | Re-baseline v1/v2 reference numbers against v0.68 build | The v1/v2 binary at `tt-llk-skeleton/build/bench_blackhole` is built against v0.62 headers. Rebuilding against v0.68 might shift the reference numbers slightly (the underlying matmul tile API has minor signature changes). The qualitative gap conclusion is unchanged either way. |
