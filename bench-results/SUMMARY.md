@@ -3,9 +3,9 @@
 - **Schema versions present**: 1, 2
   _Mixed schemas merged. v2 is a strict superset of v1 (adds Layer D, q36/q48 op_kind variants, energy fields); v1 records have v2-only fields rendered as `—`._
 - **Devices**: Blackhole, CPU, RTX5090
-- **Records**: 297
-- **Timestamps**: 2026-04-26T17:45:10+00:00 – 2026-04-28T22:41:20+00:00
-- **Git SHAs**: 0682876, 75ccd37, 7e16b7d, 8c65d9d, da91d84, dbe3cc1, dfe8c54, f6da9df, fa2e772
+- **Records**: 311
+- **Timestamps**: 2026-04-26T17:45:10+00:00 – 2026-04-28T23:00:49+00:00
+- **Git SHAs**: 0682876, 75ccd37, 7e16b7d, 8c65d9d, da91d84, dbe3cc1, dfe8c54, f468f37, f6da9df, fa2e772
 
 ## Device prices (declared, not detected)
 
@@ -110,6 +110,7 @@ _Side-by-side bar chart at one representative shape._
 | gemm_mac | 1280×1408×2816 | bf16_tuned_hifi4 | 117.93 TFLOPS | 118.048 /k$ | 39.5 W | 2.986 TFLOPS/W | skipped | — | — | — | — | — |
 | gemm_mac | 1280×2816×2816 | bf16_tuned_hifi2 | 246.51 TFLOPS | 246.757 /k$ | 39.5 W | 6.241 TFLOPS/W | skipped | — | — | — | — | — |
 | gemm_mac | 1280×2816×2816 | bf16_tuned_hifi4 | 123.75 TFLOPS | 123.874 /k$ | 39.5 W | 3.133 TFLOPS/W | skipped | — | — | — | — | — |
+| gemm_mac | 1280×2816×2816 | int8 | 38.03 TOPS | 38.069 /k$ | 40.0 W | 0.951 TOPS/W | skipped | — | — | — | — | — |
 | gemm_mac | 2048×2048×2048 | bf16 | 3.85 TFLOPS | 3.850 /k$ | — | — | skipped | — | — | — | — | — |
 | gemm_mac | 2048×2048×2048 | fp32 | — | — | — | — | skipped | 67.75 TFLOPS | 33.893 /k$ | — | — | skipped |
 | gemm_mac | 2048×2048×2048 | fp64 | — | — | — | — | — | 1.38 TFLOPS | 0.689 /k$ | — | — | skipped |
@@ -117,14 +118,18 @@ _Side-by-side bar chart at one representative shape._
 | gemm_mac | 2048×2048×2048 | tf32 | 1.96 TFLOPS | 1.963 /k$ | — | — | skipped | 89.43 TFLOPS | 44.736 /k$ | — | — | skipped |
 | gemm_mac | 2560×2816×2816 | bf16_tuned_hifi2 | 261.96 TFLOPS | 262.222 /k$ | 39.5 W | 6.632 TFLOPS/W | skipped | — | — | — | — | — |
 | gemm_mac | 2560×2816×2816 | bf16_tuned_hifi4 | 130.39 TFLOPS | 130.521 /k$ | 39.5 W | 3.301 TFLOPS/W | skipped | — | — | — | — | — |
+| gemm_mac | 2560×2816×2816 | int8 | 54.70 TOPS | 54.750 /k$ | 40.0 W | 1.367 TOPS/W | skipped | — | — | — | — | — |
 | gemm_mac | 2560×2816×4224 | bf16_tuned_hifi2 | 264.40 TFLOPS | 264.665 /k$ | 39.5 W | 6.694 TFLOPS/W | skipped | — | — | — | — | — |
 | gemm_mac | 2560×2816×4224 | bf16_tuned_hifi4 | 134.68 TFLOPS | 134.815 /k$ | 39.5 W | 3.410 TFLOPS/W | skipped | — | — | — | — | — |
 | gemm_mac | 2560×4224×4224 | bf16_tuned_hifi2 | 268.41 TFLOPS | 268.679 /k$ | 39.5 W | 6.795 TFLOPS/W | skipped | — | — | — | — | — |
 | gemm_mac | 2560×4224×4224 | bf16_tuned_hifi4 | 141.34 TFLOPS | 141.481 /k$ | 39.5 W | 3.578 TFLOPS/W | skipped | — | — | — | — | — |
+| gemm_mac | 2560×4224×4224 | int8 | 64.95 TOPS | 65.014 /k$ | 42.0 W | 1.546 TOPS/W | skipped | — | — | — | — | — |
 | gemm_mac | 3840×4224×4224 | bf16_tuned_hifi2 | 267.64 TFLOPS | 267.908 /k$ | 39.5 W | 6.776 TFLOPS/W | skipped | — | — | — | — | — |
 | gemm_mac | 3840×4224×4224 | bf16_tuned_hifi4 | 142.24 TFLOPS | 142.382 /k$ | 39.5 W | 3.601 TFLOPS/W | skipped | — | — | — | — | — |
+| gemm_mac | 3840×4224×4224 | int8 | 78.27 TOPS | 78.345 /k$ | 42.5 W | 1.842 TOPS/W | skipped | — | — | — | — | — |
 | gemm_mac | 3840×4224×5632 | bf16_tuned_hifi2 | 227.01 TFLOPS | 227.237 /k$ | 39.5 W | 5.747 TFLOPS/W | skipped | — | — | — | — | — |
 | gemm_mac | 3840×4224×5632 | bf16_tuned_hifi4 | 131.19 TFLOPS | 131.321 /k$ | 39.5 W | 3.321 TFLOPS/W | skipped | — | — | — | — | — |
+| gemm_mac | 3840×4224×5632 | int8 | 83.88 TOPS | 83.964 /k$ | 40.0 W | 2.097 TOPS/W | skipped | — | — | — | — | — |
 | gemm_mac | 3840×5632×5632 | bf16_tuned_hifi2 | 239.77 TFLOPS | 240.010 /k$ | 39.5 W | 6.070 TFLOPS/W | skipped | — | — | — | — | — |
 | gemm_mac | 3840×5632×5632 | bf16_tuned_hifi4 | 134.96 TFLOPS | 135.095 /k$ | 39.5 W | 3.417 TFLOPS/W | skipped | — | — | — | — | — |
 | gemm_mac | 4096×4096×4096 | bf16 | 3.91 TFLOPS | 3.916 /k$ | — | — | skipped | — | — | — | — | — |
@@ -134,8 +139,10 @@ _Side-by-side bar chart at one representative shape._
 | gemm_mac | 4096×4096×4096 | tf32 | 1.98 TFLOPS | 1.978 /k$ | — | — | skipped | 102.59 TFLOPS | 51.319 /k$ | — | — | skipped |
 | gemm_mac | 4160×3520×3520 | bf16_tuned_hifi2 | 226.21 TFLOPS | 226.436 /k$ | 39.5 W | 5.727 TFLOPS/W | skipped | — | — | — | — | — |
 | gemm_mac | 4160×3520×3520 | bf16_tuned_hifi4 | 134.78 TFLOPS | 134.915 /k$ | 39.5 W | 3.412 TFLOPS/W | skipped | — | — | — | — | — |
+| gemm_mac | 4160×3520×3520 | int8 | 74.01 TOPS | 74.088 /k$ | 41.0 W | 1.805 TOPS/W | skipped | — | — | — | — | — |
 | gemm_mac | 5120×5632×5632 | bf16_tuned_hifi2 | 239.17 TFLOPS | 239.409 /k$ | 39.5 W | 6.055 TFLOPS/W | skipped | — | — | — | — | — |
 | gemm_mac | 5120×5632×5632 | bf16_tuned_hifi4 | 136.01 TFLOPS | 136.146 /k$ | 39.5 W | 3.443 TFLOPS/W | skipped | — | — | — | — | — |
+| gemm_mac | 5120×5632×5632 | int8 | 93.89 TOPS | 93.986 /k$ | 41.5 W | 2.262 TOPS/W | skipped | — | — | — | — | — |
 | gemm_mac | 8192×8192×8192 | bf16 | 3.89 TFLOPS | 3.892 /k$ | — | — | skipped | — | — | — | — | — |
 | gemm_mac | 8192×8192×8192 | fp32 | — | — | — | — | skipped | 61.69 TFLOPS | 30.862 /k$ | — | — | skipped |
 | gemm_mac | 8192×8192×8192 | fp64 | — | — | — | — | — | 1.58 TFLOPS | 0.792 /k$ | — | — | skipped |

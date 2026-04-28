@@ -48,3 +48,4 @@ generated/
 tt-llk-skeleton/build/
 tt-llk-skeleton/build_sfpu/
 tt-llk-skeleton/build_sfpu_ip/
+tt-llk-skeleton/build_int8_tuned/

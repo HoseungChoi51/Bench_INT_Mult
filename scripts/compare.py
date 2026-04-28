@@ -75,6 +75,14 @@ BACKEND_CLASS = {
     "tt_matmul_2d_bf8_hifi2_traced":    "bf8_sanity",
     "tt_matmul_2d_bf4_lofi":            "bf4_sanity",
     "tt_matmul_2d_bf4_lofi_traced":     "bf4_sanity",
+    # Phase 7 (INT8 extension) — block-tiled INT8 matmul (no mcast).
+    # Drops the `llk` prefix to match the rest of the tuned family;
+    # joins NVIDIA cublaslt_int8 in the int8 class so the row sits
+    # alongside the v1 reference `tt_llk_int8` and the cuBLASLt INT8
+    # reference. See doc/04_phase7_tuned_matmul.md §4.7.
+    "tt_matmul_2d_int8_hifi4":          "int8",
+    "tt_matmul_2d_int8_hifi2":          "int8",
+    "tt_matmul_2d_int8_lofi":           "int8",
     # Phase 8 — SFPU INT32 fused mul+add. No NVIDIA counterpart in the
     # current dataset (the matrix engine has no INT32 surface, and we
     # have not yet wired a CUDA-core int32 FMA row); the comparison row
