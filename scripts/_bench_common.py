@@ -36,7 +36,7 @@ SCHEMA_VERSION = "2"
 #   v2 (TT-side)   — adds Layer D (klss_ip_modmul); splits exact_modmul into
 #                    q36 / q48 variants; adds joules/power telemetry. v2 is a
 #                    strict superset of v1, so old records are still valid.
-Layer = Literal["A", "B", "C", "D"]
+Layer = Literal["A", "B", "C", "D", "E"]
 UsefulOpKind = Literal[
     "gemm_mac",
     "exact_modmul",       # legacy alias; v1 records use this for q36
@@ -46,6 +46,8 @@ UsefulOpKind = Literal[
     "klss_ip_modmul",
     "klss_ip_modmul_q36",
     "klss_ip_modmul_q48",
+    "int32_fma_eltwise",  # SFPU per-element a*b+c (v2 Phase 8)
+    "int32_inner_product",  # SFPU per-lane Σ a[t]·b[t] (v2 Phase 8 ext.)
 ]
 GateOutcome = Literal["passed", "skipped", "failed"]
 

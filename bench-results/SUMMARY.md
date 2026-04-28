@@ -3,9 +3,9 @@
 - **Schema versions present**: 1, 2
   _Mixed schemas merged. v2 is a strict superset of v1 (adds Layer D, q36/q48 op_kind variants, energy fields); v1 records have v2-only fields rendered as `—`._
 - **Devices**: Blackhole, CPU, RTX5090
-- **Records**: 283
-- **Timestamps**: 2026-04-26T17:45:10+00:00 – 2026-04-28T00:35:03+00:00
-- **Git SHAs**: 0682876, 75ccd37, 7e16b7d, 8c65d9d, da91d84, dbe3cc1, f6da9df, fa2e772
+- **Records**: 297
+- **Timestamps**: 2026-04-26T17:45:10+00:00 – 2026-04-28T22:41:20+00:00
+- **Git SHAs**: 0682876, 75ccd37, 7e16b7d, 8c65d9d, da91d84, dbe3cc1, dfe8c54, f6da9df, fa2e772
 
 ## Device prices (declared, not detected)
 
@@ -228,6 +228,26 @@ _Side-by-side bar chart at one representative shape._
 | klss_ip_modmul_q48 | 2048×2048×2048 | int8 | 206.39 G_MAC/s | 206.598 /k$ | 44.5 W | 4.638 G_MAC/s/W | passed |
 | klss_ip_modmul_q48 | 4096×4096×4096 | int8 | 210.81 G_MAC/s | 211.020 /k$ | 45.0 W | 4.685 G_MAC/s/W | passed |
 | klss_ip_modmul_q48 | 8192×8192×8192 | int8 | 205.53 G_MAC/s | 205.736 /k$ | 44.0 W | 4.671 G_MAC/s/W | passed |
+
+## Layer E — SFPU INT32 microbench (Phase 8)
+### Layer E
+
+| op_kind | shape | backend | Blackhole thr | Blackhole /k$ | Blackhole W | Blackhole thr/W | Blackhole gate |
+|---|---|---|---|---|---|---|---|
+| int32_fma_eltwise | 1×110×1024 | int32_fma_eltwise | 7.12 GOPS | 7.129 /k$ | 39.5 W | 0.180 GOPS/W | passed |
+| int32_fma_eltwise | 1×110×4096 | int32_fma_eltwise | 17.71 GOPS | 17.732 /k$ | 39.5 W | 0.448 GOPS/W | passed |
+| int32_fma_eltwise | 1×110×16384 | int32_fma_eltwise | 26.99 GOPS | 27.016 /k$ | 39.5 W | 0.683 GOPS/W | passed |
+| int32_fma_eltwise | 1×110×65536 | int32_fma_eltwise | 36.35 GOPS | 36.387 /k$ | 39.5 W | 0.920 GOPS/W | passed |
+| int32_fma_eltwise | 1×110×262144 | int32_fma_eltwise | 39.07 GOPS | 39.112 /k$ | 39.0 W | 1.002 GOPS/W | passed |
+| int32_fma_eltwise | 1×110×1048576 | int32_fma_eltwise | 40.37 GOPS | 40.414 /k$ | 39.5 W | 1.022 GOPS/W | passed |
+| int32_fma_eltwise | 1×110×4194304 | int32_fma_eltwise | 40.73 GOPS | 40.773 /k$ | 40.0 W | 1.018 GOPS/W | passed |
+| int32_inner_product | 1×112640×1 | int32_inner_product | 3.78 GOPS | 3.782 /k$ | 40.0 W | 0.094 GOPS/W | passed |
+| int32_inner_product | 1×450560×1 | int32_inner_product | 18.96 GOPS | 18.981 /k$ | 40.0 W | 0.474 GOPS/W | passed |
+| int32_inner_product | 1×1802240×1 | int32_inner_product | 34.65 GOPS | 34.682 /k$ | 40.0 W | 0.866 GOPS/W | passed |
+| int32_inner_product | 1×7208960×1 | int32_inner_product | 52.17 GOPS | 52.226 /k$ | 40.0 W | 1.304 GOPS/W | passed |
+| int32_inner_product | 1×28835840×1 | int32_inner_product | 59.29 GOPS | 59.346 /k$ | 42.5 W | 1.395 GOPS/W | passed |
+| int32_inner_product | 1×115343360×1 | int32_inner_product | 60.92 GOPS | 60.980 /k$ | 41.0 W | 1.486 GOPS/W | passed |
+| int32_inner_product | 1×461373440×1 | int32_inner_product | 61.45 GOPS | 61.508 /k$ | 40.0 W | 1.536 GOPS/W | passed |
 
 ## How to update
 

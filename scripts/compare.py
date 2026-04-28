@@ -75,6 +75,15 @@ BACKEND_CLASS = {
     "tt_matmul_2d_bf8_hifi2_traced":    "bf8_sanity",
     "tt_matmul_2d_bf4_lofi":            "bf4_sanity",
     "tt_matmul_2d_bf4_lofi_traced":     "bf4_sanity",
+    # Phase 8 — SFPU INT32 fused mul+add. No NVIDIA counterpart in the
+    # current dataset (the matrix engine has no INT32 surface, and we
+    # have not yet wired a CUDA-core int32 FMA row); the comparison row
+    # is TT-only by design.
+    "tt_sfpu_int32_fma":                "int32_fma_eltwise",
+    # Phase 8 (extension) — SFPU INT32 inner product, per-lane partial
+    # sum staying in SFPU registers. Same TT-only join; input bounds are
+    # planned per-shape so the per-lane sum stays in INT31.
+    "tt_sfpu_int32_inner_product":      "int32_inner_product",
 }
 
 
@@ -441,6 +450,8 @@ def render_summary(records: list[dict[str, Any]]) -> str:
     lines.append(render_layer(records, "C") or "_no Layer C records_\n")
     lines.append("## Layer D — KLSS-style inner product (useful MAC view)")
     lines.append(render_layer(records, "D") or "_no Layer D records_\n")
+    lines.append("## Layer E — SFPU INT32 microbench (Phase 8)")
+    lines.append(render_layer(records, "E") or "_no Layer E records_\n")
 
     lines.append("## How to update")
     lines.append("")

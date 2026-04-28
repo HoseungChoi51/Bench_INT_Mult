@@ -46,3 +46,5 @@ generated/
 
 # TT-LLK skeleton build artifacts (compiled on the TT host).
 tt-llk-skeleton/build/
+tt-llk-skeleton/build_sfpu/
+tt-llk-skeleton/build_sfpu_ip/
