@@ -20,6 +20,13 @@ The artifacts in this repo come in three layers:
   3. [`03_caveats.md`](03_caveats.md) — what's missing, what's
      deferred to v2, and the methodology limits a reader should keep
      in mind before quoting any of these numbers.
+  4. [`04_phase7_tuned_matmul.md`](04_phase7_tuned_matmul.md) — the
+     Phase 7 reproduction of TT-Metal's upstream GEMM_FLOPS benchmark.
+     Why our v1+v2 reference Layer B numbers were ~37–70× under the
+     matrix engine's actual capability, what it took to unblock the
+     reproduction (firmware ↔ tt-metal ↔ ttnn three-way mismatch and
+     the side-by-side rebuild that fixed it), and how the tuned
+     numbers reframe every cross-device ratio in `02_findings.md`.
 
 The numbers cited here are reproducible from the JSONL files in
 [`bench-results/`](../bench-results/). When the data is refreshed (new
