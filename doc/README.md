@@ -20,6 +20,26 @@ The artifacts in this repo come in three layers:
   3. [`03_caveats.md`](03_caveats.md) — what's missing, what's
      deferred to v2, and the methodology limits a reader should keep
      in mind before quoting any of these numbers.
+  4. [`04_phase7_tuned_matmul.md`](04_phase7_tuned_matmul.md) — the
+     Phase 7 reproduction of TT-Metal's upstream GEMM_FLOPS benchmark.
+     Why our v1+v2 reference Layer B numbers were ~37–70× under the
+     matrix engine's actual capability, what it took to unblock the
+     reproduction (firmware ↔ tt-metal ↔ ttnn three-way mismatch and
+     the side-by-side rebuild that fixed it), and how the tuned
+     numbers reframe every cross-device ratio in `02_findings.md`.
+
+The [`discussions/`](discussions/) subdirectory holds **open analytical
+sidebars** — caveats, asymmetries, follow-up experiments — that aren't
+yet part of the main numbered narrative but should travel with the
+benchmark. Each entry is a self-contained markdown file with a "Status"
+line at the top:
+
+- [`discussions/nvidia_cublaslt_int8_utilization.md`](discussions/nvidia_cublaslt_int8_utilization.md)
+  — why the §4.5.4 RTX 5090 INT8 number (215 TOPS) sits at only ~51 %
+  of dense Tensor Core peak, why that's the expected `torch._int_mm`
+  utilization, and the asymmetry vs the TT mcast number sitting at
+  ~83 % of its matrix-engine ceiling. Decides between re-running with
+  CUTLASS vs documenting the caveat in §4.5.4.
 
 The numbers cited here are reproducible from the JSONL files in
 [`bench-results/`](../bench-results/). When the data is refreshed (new

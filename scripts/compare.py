@@ -57,6 +57,46 @@ BACKEND_CLASS = {
     "tt_llk_sfpu_fp32": "fp32",
     "cublaslt_fp64": "fp64",
     "cpu_int128": "cpu",
+    # Phase 7 — upstream tt-metal GEMM_FLOPS reproduction (high-precision
+    # candidates only; BF8/BF4 are sanity-only). Each row gets its own
+    # backend_class so the tuned numbers don't collide with our reference
+    # Layer B rows (`tt_llk_bf16`, `tt_llk_fp32_matrix`, etc.) — readers
+    # can see the gap between reference and tuned at a glance.
+    "tt_matmul_2d_bf16_hifi4":          "bf16_tuned_hifi4",
+    "tt_matmul_2d_bf16_hifi4_traced":   "bf16_tuned_hifi4",
+    "tt_matmul_2d_bf16_hifi2":          "bf16_tuned_hifi2",
+    "tt_matmul_2d_bf16_hifi2_traced":   "bf16_tuned_hifi2",
+    # Tuned FP32-matrix path joins NVIDIA cublaslt_fp32 (CUDA core, true
+    # IEEE FP32) since both are end-user "FP32" surfaces — but keep in
+    # mind TT's matrix engine internally truncates FP32 inputs to TF32.
+    "tt_matmul_2d_fp32_hifi4":          "fp32_tuned",
+    "tt_matmul_2d_fp32_hifi4_traced":   "fp32_tuned",
+    "tt_matmul_2d_bf8_hifi2":           "bf8_sanity",
+    "tt_matmul_2d_bf8_hifi2_traced":    "bf8_sanity",
+    "tt_matmul_2d_bf4_lofi":            "bf4_sanity",
+    "tt_matmul_2d_bf4_lofi_traced":     "bf4_sanity",
+    # Phase 7 INT8 family: each kernel-quality tier gets its own
+    # backend_class so the rows render as separate lines in the joined
+    # SUMMARY (same-shape collapse would otherwise pick last-wins).
+    # NVIDIA cublaslt_int8 and the v1 TT reference (`tt_llk_int8`) stay
+    # in the `int8` class — the only one with cross-device coverage.
+    # Block-tiled and mcast tiers are TT-only, so they don't lose
+    # anything by being in their own classes.
+    "tt_matmul_2d_int8_hifi4":          "int8_tuned",
+    "tt_matmul_2d_int8_hifi2":          "int8_tuned",
+    "tt_matmul_2d_int8_lofi":           "int8_tuned",
+    "tt_matmul_2d_int8_mcast_hifi4":    "int8_tuned_mcast",
+    "tt_matmul_2d_int8_mcast_hifi2":    "int8_tuned_mcast",
+    "tt_matmul_2d_int8_mcast_lofi":     "int8_tuned_mcast",
+    # Phase 8 — SFPU INT32 fused mul+add. No NVIDIA counterpart in the
+    # current dataset (the matrix engine has no INT32 surface, and we
+    # have not yet wired a CUDA-core int32 FMA row); the comparison row
+    # is TT-only by design.
+    "tt_sfpu_int32_fma":                "int32_fma_eltwise",
+    # Phase 8 (extension) — SFPU INT32 inner product, per-lane partial
+    # sum staying in SFPU registers. Same TT-only join; input bounds are
+    # planned per-shape so the per-lane sum stays in INT31.
+    "tt_sfpu_int32_inner_product":      "int32_inner_product",
 }
 
 
@@ -423,6 +463,8 @@ def render_summary(records: list[dict[str, Any]]) -> str:
     lines.append(render_layer(records, "C") or "_no Layer C records_\n")
     lines.append("## Layer D — KLSS-style inner product (useful MAC view)")
     lines.append(render_layer(records, "D") or "_no Layer D records_\n")
+    lines.append("## Layer E — SFPU INT32 microbench (Phase 8)")
+    lines.append(render_layer(records, "E") or "_no Layer E records_\n")
 
     lines.append("## How to update")
     lines.append("")
